@@ -58,15 +58,16 @@
    keeps its edge; distant motes become the soft points they
    physically are.
 
-   THE PHASE FUNCTION USES §2.0's OWN CONVENTION. inscatter() puts
-   a flat 0.75 where a normalised phase function would put 1/4pi,
-   so it is roughly ten times a physically normalised isotropic
-   scatter. Lighting a mote with a bare hg() against that veil
-   would make marine snow darker than the water it floats in.
-   SNOW_PHASE_NORM = 0.75 * 4pi rescales hg() into the same
-   convention: a mote in unlit water then sits exactly at the veil
-   times its albedo, and brightens by hg/hg_isotropic towards the
-   sun and by causticAt() inside a shaft. No hard-coded blue, no
+   THE PHASE FUNCTION IS THE BARE hg(). §2.0's inscatter() used to
+   put a flat 0.75 where a phase function belongs, so a mote lit
+   by a normalised hg() came out darker than the water it floats
+   in and SNOW_PHASE_NORM existed to rescale it back. inscatter()
+   now carries hg(0.0, 0.62) itself, so both sides are radiance
+   per steradian and the norm is 1: a mote in unlit water sits at
+   albedo * E * hg(theta) against a veil of (sigma_s/sigma_t) * E
+   * 0.030, which is about two and a half times the veil looking
+   level, and brightens further by hg/hg_isotropic towards the sun
+   and by causticAt() inside a shaft. No hard-coded blue, no
    fudge factor, and the twinkle comes out at four to five times
    the veil in a caustic filament.
 
@@ -124,10 +125,12 @@ export const SNOW_DISC_PIXELS = 16.0;
 export const SNOW_PHASE_G = 0.45;
 
 /**
- * Rescales hg() into inscatter()'s 0.75-for-a-phase-function convention. See
- * the header. 0.75 * 4pi.
+ * Kept as a named constant, and kept at 1, because it is the seam between the
+ * mote and the medium: hg() already integrates to one over the sphere, and
+ * inscatter() now carries its own phase factor, so no rescale belongs here.
+ * It existed only to undo the flat 0.75 the veil used to be built from.
  */
-export const SNOW_PHASE_NORM = 0.75 * 4.0 * Math.PI;
+export const SNOW_PHASE_NORM = 1.0;
 
 /** Default `uSnowAlbedo`. Detrital aggregates are pale but not white. */
 export const SNOW_ALBEDO = 0.8;

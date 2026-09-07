@@ -75,8 +75,16 @@ const vec3 SUN_E0  = vec3(1.00, 1.02, 1.05) * 22.0;
 // Downwelling radiance at depth. worldY <= 0, surface at y = 0.
 vec3 downwelling(float y){ return SUN_E0 * exp(KD * y); }
 
-// Ambient in-scatter: single-scattering albedo x downwelling.
-vec3 inscatter(float y){ return (SIG_S_W / SIG_T_W) * downwelling(y) * 0.75; }
+// Ambient in-scatter: single-scattering albedo x downwelling x phase. The last
+// factor is a RADIANCE normalisation, not a taste knob: downwelling() is an
+// irradiance, and what a horizontal view ray sees is the fraction of it that
+// scatters into one steradian around 90 degrees off the vertical, which is
+// hg(0.0, G_GEL's water analogue 0.62) = 0.030. It was a flat 0.75 -- twenty
+// five times too much -- and that single number is what made the frame one
+// featureless field: the shafts, the marine snow and the animal are all lit
+// from downwelling() directly and were sitting five per cent above a veil that
+// should have been five stops below them.
+vec3 inscatter(float y){ return (SIG_S_W / SIG_T_W) * downwelling(y) * 0.030; }
 
 // THE SHARED SNIPPET. Ends every shader in the project. This one function is
 // why the animal sits IN the water instead of on top of it.
@@ -133,9 +141,9 @@ export function downwelling(out, y) {
 export function inscatter(out, y) {
   const s = MEDIUM.SIG_S_W, t = MEDIUM.SIG_T_W;
   downwelling(out, y);
-  out[0] *= (s[0] / t[0]) * 0.75;
-  out[1] *= (s[1] / t[1]) * 0.75;
-  out[2] *= (s[2] / t[2]) * 0.75;
+  out[0] *= (s[0] / t[0]) * 0.030;
+  out[1] *= (s[1] / t[1]) * 0.030;
+  out[2] *= (s[2] / t[2]) * 0.030;
   return out;
 }
 

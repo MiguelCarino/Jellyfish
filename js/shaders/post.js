@@ -102,6 +102,16 @@ export const POST_CONSTANTS = Object.freeze({
   NOISE_READ: 0.0016,
   NOISE_CHROMA: 0.0030,
 
+  /* Scene-referred to display-referred: the one fixed stop the chain was
+     missing. SUN_E0 is an irradiance in arbitrary units and AgX puts middle
+     grey at 0.18, so without this the water column arrives several stops into
+     the shoulder, lands near display white and takes the scene's whole red-to-
+     blue ratio with it. This is NOT a grade -- it is one scalar on all three
+     channels, the sensor's ISO, and it is what makes BLOOM_THRESHOLD,
+     VEIL_WEIGHT and the noise floor below mean anything at all. The +-0.25 EV
+     meter trims it; it does not replace it. */
+  SCENE_EXPOSURE: 0.36,
+
   /* Auto-exposure. Clamped far tighter than a game's eye adaptation: a periodic
      brightness pump in peripheral vision at 3am is the classic ambient killer. */
   EXPOSURE_TAU: 3.0,

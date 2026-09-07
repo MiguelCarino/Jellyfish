@@ -464,7 +464,16 @@ export function createFrameGraph(gl, options = {}) {
   const fullscreen = registry.add(createFullscreenTriangle(gl));
 
   const floatPath = targets.floatPath;
-  const hdrDecode = targets.hdrDecode;
+  /*
+   * targets.hdrDecode undoes the RGBA8 write-time pre-exposure; the scene
+   * exposure rides along with it because every consumer of this number -- the
+   * bright pass, the 1x1 meter and the composite -- has to see the same
+   * display-referred scale, or the bloom knee and the exposure key end up
+   * measuring a different frame from the one that reaches the screen. The
+   * bright pass re-encodes with 1 / hdrDecode, so BLOOM keeps exactly the
+   * storage range it had on both paths.
+   */
+  const hdrDecode = targets.hdrDecode * POST_CONSTANTS.SCENE_EXPOSURE;
 
   /*
    * §7 step 4: without OES_texture_float_linear a 32F texture cannot be
