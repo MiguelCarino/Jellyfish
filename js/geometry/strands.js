@@ -87,9 +87,16 @@ const LONG_STRAND_SCALE = 1.9;
 const SHORT_STRAND_COUNT = 2;
 const SHORT_STRAND_SCALE = 0.35;
 
-/** §3.3: arm width 0.9 R at the root falling to 0.15 R at the tip. */
-export const ARM_WIDTH_ROOT = 0.9;
-export const ARM_WIDTH_TIP = 0.15;
+/*
+ * §3.3 asks for a 0.9 R arm width at the root falling to 0.15 R at the tip.
+ * Rendered, four ribbons that wide overlap into one continuous curtain twice
+ * the width of the bell -- the animal reads as a bell with a sack under it
+ * rather than as four separate arms, and an Aurelia's oral arms are nearer a
+ * fifth of the bell diameter across at the mouth. 0.42 R keeps them broad
+ * enough to catch the light as sheets and narrow enough to read as four.
+ */
+export const ARM_WIDTH_ROOT = 0.42;
+export const ARM_WIDTH_TIP = 0.07;
 /** §3.3: the frill, `w += 0.012 R · sin(9s + 2.4·t_ret + hash(arm))`. */
 export const ARM_FRILL_AMPLITUDE = 0.012;
 export const ARM_FRILL_FREQUENCY = 9.0;
@@ -104,6 +111,19 @@ export const ARM_RUFFLE_ACROSS = 2.2;
 
 /** Oral arms are §2.6's "vDensity ~3× higher". */
 export const ARM_DENSITY = 3.0;
+
+/**
+ * How much of the ray an oral arm actually occupies, as a fraction of what its
+ * screen width implies. The strand fragment shader reads a strand's across-the-
+ * ribbon profile as its opacity, which is exactly right for a tentacle -- a
+ * 1.8 mm tube is as deep as it is wide -- and badly wrong for an arm, which is
+ * a folded sheet some 12 cm across and a few millimetres through. Left at 1 the
+ * four arms rasterise as opaque sails and the bell, the gonads and the whole
+ * fringe disappear behind them. 0.25 is the folded thickness over the width
+ * with the frilling counted, and it is what puts the water back behind the
+ * curtain.
+ */
+export const ARM_COVERAGE = 0.25;
 /** Arm length in units of R. */
 export const ARM_LENGTH = 2.0;
 

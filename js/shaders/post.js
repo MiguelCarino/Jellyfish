@@ -110,7 +110,7 @@ export const POST_CONSTANTS = Object.freeze({
      channels, the sensor's ISO, and it is what makes BLOOM_THRESHOLD,
      VEIL_WEIGHT and the noise floor below mean anything at all. The +-0.25 EV
      meter trims it; it does not replace it. */
-  SCENE_EXPOSURE: 0.36,
+  SCENE_EXPOSURE: 0.20,
 
   /* Auto-exposure. Clamped far tighter than a game's eye adaptation: a periodic
      brightness pump in peripheral vision at 3am is the classic ambient killer. */

@@ -130,6 +130,8 @@ layout(location = 2) in vec4 aParam2;   // (across, halfWidth m, density, ruffle
 uniform mat4  uViewProj;
 uniform vec3  uCameraPos;
 uniform float uPixelScale;
+/* Zero for the tentacles, the bell's axis for the oral arms. See below. */
+uniform vec3  uRibbonAxis;
 
 out vec3  vWorldPos;
 out float vAcross;
@@ -149,17 +151,41 @@ void main(){
   // straight at the eye the cross product degenerates; any perpendicular will do
   // there, because a ribbon seen exactly end-on covers no pixels either way.
   vec3  T = normalize(aTangent);
-  vec3  B = cross(T, V);
+  vec3  fallback = normalize(abs(T.y) < 0.9 ? cross(T, vec3(0.0, 1.0, 0.0))
+                                            : cross(T, vec3(1.0, 0.0, 0.0)));
+
+  /*
+   * A tentacle is a tube: it has no orientation of its own, so its strip is
+   * built across the eye vector and is broadside from everywhere. An oral arm
+   * is a SHEET, and billboarding one is what turned four ribbons into four
+   * sails that never once showed their edge -- the single most artificial thing
+   * about the animal. Given the bell's axis the ribbon lies in the plane the
+   * arm hangs in, so the camera sees it broadside from one side of the animal,
+   * foreshortened as it swings past, and as a bright thread edge-on. It is also
+   * what lets the arms cross each other visibly instead of sliding through one
+   * another as four parallel cards.
+   */
+  float axisLen = length(uRibbonAxis);
+  vec3  B;
+  if (axisLen > 0.5) {
+    B = cross(T, uRibbonAxis / axisLen);
+  } else {
+    B = cross(T, V);
+  }
   float bl = length(B);
-  B = bl > 1e-4 ? B / bl
-                : normalize(abs(T.y) < 0.9 ? cross(T, vec3(0.0, 1.0, 0.0))
-                                           : cross(T, vec3(1.0, 0.0, 0.0)));
+  B = bl > 1e-4 ? B / bl : fallback;
 
   float halfW = max(aParam2.y, 1e-6);
 
-  // The projected width BEFORE widening. The fragment stage divides by the same
+  // The projected width BEFORE widening, foreshortened by how far the ribbon
+  // has turned away from the eye. the face term is identically 1 for the tentacles,
+  // whose B is perpendicular to V by construction, so their arithmetic is
+  // unchanged; for an arm it is what makes an edge-on ribbon thin instead of
+  // just as wide as a broadside one. The fragment stage divides by the same
   // floor to take back exactly the energy this widening adds.
-  float widthPx = 2.0 * halfW * uPixelScale / dist;
+  float bv   = dot(B, V);
+  float face = sqrt(max(1.0 - bv * bv, 0.0));
+  float widthPx = 2.0 * halfW * uPixelScale * face / dist;
   float expand  = max(1.0, STRAND_MIN_WIDTH_PX / max(widthPx, 1e-5));
 
   // §3.3's ruffle, out of the ribbon plane. Ignoring aParam2.w would still give
@@ -212,6 +238,7 @@ in float vWorldWidthPx;
 #define STRAND_SHADOW_FRACTION  ${STRAND_SHADOW_FRACTION}
 
 uniform vec3 uCameraPos;
+uniform float uCoverage;
 
 out vec4 fragColor;
 
@@ -220,6 +247,16 @@ void main(){
   // Exponent 1.6 -- a plain Gaussian reads as smoke, a hard edge aliases.
   float r = abs(vAcross);
   float a = exp(-pow(r * STRAND_FALLOFF_SCALE, STRAND_FALLOFF_EXPONENT));
+
+  // A tentacle is a tube: what it covers across the screen is also what the
+  // ray travels through, so the profile above IS its opacity. An oral arm is a
+  // SHEET -- twelve centimetres wide and a couple of millimetres thick -- and
+  // reading its width as its depth turned four ribbons into opaque sails that
+  // hid the entire animal behind them. uCoverage is that geometry correction,
+  // one number per draw call: 1 for the tentacles, the arms' thickness-to-width
+  // ratio for the arms. It scales the premultiplied colour with the alpha,
+  // which is right -- less tissue on the ray scatters proportionally less.
+  a *= uCoverage;
 
   // Screen-space minimum width with compensating alpha: without this a 4K render
   // shimmers into static.

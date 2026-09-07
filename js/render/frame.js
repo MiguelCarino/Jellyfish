@@ -109,6 +109,7 @@ import {
   STRAND_GLSL_INCLUDES,
   STRAND_ATTRIBUTE_LOCATIONS
 } from '../shaders/strands.js';
+import { ARM_COVERAGE } from '../geometry/strands.js';
 import {
   SNOW_VS,
   SNOW_FS,
@@ -376,7 +377,8 @@ export function describePrograms(config = {}) {
     defines: gainDefines,
     includes: STRAND_GLSL_INCLUDES,
     attributeLocations: STRAND_ATTRIBUTE_LOCATIONS
-  }, [...MEDIUM_UNIFORMS, ...LIGHTING_UNIFORMS, 'uViewProj', 'uCameraPos', 'uPixelScale']);
+  }, [...MEDIUM_UNIFORMS, ...LIGHTING_UNIFORMS, 'uViewProj', 'uCameraPos', 'uPixelScale',
+    'uCoverage', 'uRibbonAxis']);
 
   add('snow', {
     vertex: SNOW_VS,
@@ -439,6 +441,10 @@ const _drift = [0, 0];
 const _lightEye = new Vec3();
 const _bodyCentre = new Vec3();
 const _camPos = [0, 0, 0];
+/* The oral arms' ribbon plane, and the zero that means "billboard" for the
+   tentacles. Module scope, because the render path allocates nothing. */
+const _ribbonAxis = [0, 1, 0];
+const _noRibbonAxis = [0, 0, 0];
 const _worldOrigin = [0, 0, 0];
 const _lightEyeArray = [0, 0, 0];
 const _invThick = [0, 0];
@@ -921,6 +927,8 @@ export function createFrameGraph(gl, options = {}) {
       program.set('uViewProj', seaViewProj);
       program.set('uCameraPos', _camPos);
       program.set('uPixelScale', seaPixelScale);
+      program.set('uRibbonAxis', _noRibbonAxis);
+      program.set('uCoverage', 1.0);
       state.apply({
         blend: 'premultiplied', depthTest: true, depthWrite: false,
         depthFunc: 'less', cull: 'none'
@@ -1008,6 +1016,34 @@ export function createFrameGraph(gl, options = {}) {
       mat3.identity(_normalMatrix);
     }
 
+    /*
+     * WHICH SHELL IS NEAREST. Passes 5 and 6 are not "subumbrella" and
+     * "exumbrella" — they are FAR shell and NEAR shell. The far one is blended
+     * into SEA with the cavity, the gonads and the manubrium; the near one is
+     * drawn last and composites all of that through itself with refraction,
+     * which is §2.6's whole reason for not depth-sorting the animal.
+     *
+     * The camera does not stay on one side of the bell. §4.5's orbit swings
+     * from 24 degrees above the animal to 12 below, and the animal is climbing
+     * through that orbit, so for a good part of every minute the page is
+     * looking UP at the subumbrella. Pinning the near shell to the exumbrella
+     * meant that during those stretches the visible sheet was the one being
+     * culled: measured on a frame from below, all 3008 subumbrella triangles
+     * facing the eye were front-facing and pass 5's cull FRONT threw away every
+     * one of them. The animal lost its dome, its canals and its rim and became
+     * the gonad tubes hanging in open water, which is exactly how it looked.
+     *
+     * The cull modes below are unchanged and correct for both cases: the near
+     * shell keeps the faces that point at the eye, the far shell keeps the ones
+     * that point away, because what you see of the far sheet is its inside.
+     */
+    const nearIsExumbrella =
+      (_camPos[0] - _bodyCentre.x) * swim.bellAxis.x +
+      (_camPos[1] - _bodyCentre.y) * swim.bellAxis.y +
+      (_camPos[2] - _bodyCentre.z) * swim.bellAxis.z >= 0;
+    const farShell  = nearIsExumbrella ? 'subumbrella' : 'exumbrellaWithRim';
+    const nearShell = nearIsExumbrella ? 'exumbrellaWithRim' : 'subumbrella';
+
     state.bindTarget(targets.seaTarget);
     {
       const program = programs[useThickness ? 'bell.subumbrella' : 'bell.subumbrella.analytic'];
@@ -1032,13 +1068,13 @@ export function createFrameGraph(gl, options = {}) {
         program.set('uThickSize', [targets.thickWidth, targets.thickHeight]);
       }
 
-      // The inner shell is seen from inside the cavity, so its outward-facing
-      // triangles point away from the camera: cull FRONT.
+      // The far shell is seen from its inside, so the triangles that reach the
+      // eye are the ones facing away from it: cull FRONT.
       state.apply({
         blend: 'alpha', depthTest: true, depthWrite: false,
         depthFunc: 'less', cull: 'front'
       });
-      lod.draw('subumbrella');
+      lod.draw(farShell);
 
       // The gonad tubes and the manubrium are closed tubes seen from outside.
       state.apply({
@@ -1058,6 +1094,11 @@ export function createFrameGraph(gl, options = {}) {
       program.set('uViewProj', seaViewProj);
       program.set('uCameraPos', _camPos);
       program.set('uPixelScale', seaPixelScale);
+      _ribbonAxis[0] = swim.bellAxis.x;
+      _ribbonAxis[1] = swim.bellAxis.y;
+      _ribbonAxis[2] = swim.bellAxis.z;
+      program.set('uRibbonAxis', _ribbonAxis);
+      program.set('uCoverage', ARM_COVERAGE);
       state.apply({
         blend: 'premultiplied', depthTest: true, depthWrite: false,
         depthFunc: 'less', cull: 'none'
@@ -1107,7 +1148,7 @@ export function createFrameGraph(gl, options = {}) {
         program.set('uThickSize', [targets.thickWidth, targets.thickHeight]);
       }
       state.apply({ blend: 'premultiplied', depthTest: false, depthWrite: false, cull: 'back' });
-      lod.draw('exumbrellaWithRim');
+      lod.draw(nearShell);
     }
 
     // The front strands, then the near snow: the two things that must sit in
@@ -1120,6 +1161,8 @@ export function createFrameGraph(gl, options = {}) {
       program.set('uViewProj', camera.viewProjection);
       program.set('uCameraPos', _camPos);
       program.set('uPixelScale', finalPixelScale);
+      program.set('uRibbonAxis', _noRibbonAxis);
+      program.set('uCoverage', 1.0);
       state.apply({ blend: 'premultiplied', depthTest: false, depthWrite: false, cull: 'none' });
       view.strands.drawFront();
     }

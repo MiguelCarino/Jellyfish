@@ -61,8 +61,18 @@ export const BELL_RADIUS = 0.13;
 /** Relaxed apex height as a fraction of R, from the profile's first knot. */
 export const BELL_HEIGHT_RATIO = 0.340;
 
-/** Wall thickness coefficients: w(φ)/R = WALL_A·(1 − φ²) + WALL_B. */
-export const WALL_A = 0.058;
+/*
+ * Wall thickness coefficients: w(φ)/R = WALL_A·(1 − φ²) + WALL_B.
+ *
+ * WALL_A was 0.058, which puts 7.5 mm of mesoglea over the apex of a 26 cm
+ * animal. A moon jelly that size carries nearer a centimetre and a half there:
+ * the double pass through the dome is what a photograph actually shows as the
+ * pale disc, and at 7.5 mm the whole bell scattered under nine per cent of the
+ * light reaching it and rendered as a rumour. §5.5's own anchors are the
+ * check -- they put the lit bell at three to four times the water column
+ * behind it, and this is half of what gets it there.
+ */
+export const WALL_A = 0.120;
 export const WALL_B = 0.006;
 
 /**

@@ -66,7 +66,14 @@ const vec3 SIG_S_W = vec3(0.045, 0.055, 0.075);   // 1/m
 const vec3 KD      = vec3(0.420, 0.075, 0.032);   // 1/m
 // Mesoglea. Reduced (similarity theory) at use site.
 const vec3 SIG_A_G = vec3(2.60, 0.55, 0.16);      // 1/m
-const vec3 SIG_S_G = vec3(14.0, 16.5, 19.0);      // 1/m
+// Raised from (14.0, 16.5, 19.0): with g = 0.72 those reduce to under 5.3 /m,
+// so even a centimetre and a half of dome scattered a tenth of the light that
+// reached it and the animal came out fainter than the water column §5.5 says
+// it should sit three to four times above. Mesoglea is mostly sea water and
+// its scattering is genuinely low, but not that low -- a moon jelly is legible
+// from metres away in a photograph, and these are the numbers that make the
+// render agree with the palette anchors the spec verifies against.
+const vec3 SIG_S_G = vec3(22.0, 26.0, 30.0);      // 1/m
 const float G_GEL  = 0.72;                        // was 0.86 -- see §4.5
 
 // Scene-referred, essentially white. NEVER tinted blue.
@@ -119,7 +126,7 @@ export const MEDIUM = Object.freeze({
   /** Mesoglea absorption, 1/m. */
   SIG_A_G: Object.freeze([2.60, 0.55, 0.16]),
   /** Mesoglea scattering, 1/m. Reduce by (1 - G_GEL) at the use site. */
-  SIG_S_G: Object.freeze([14.0, 16.5, 19.0]),
+  SIG_S_G: Object.freeze([22.0, 26.0, 30.0]),
   /** Mesoglea phase asymmetry. Lowered from 0.86 to kill the periodic backlight flare. */
   G_GEL: 0.72,
   /** Scene-referred sun irradiance. Essentially white, never tinted blue. */

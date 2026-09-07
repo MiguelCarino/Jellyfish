@@ -17,7 +17,7 @@
      flow.step(dt, swim)               the jet and the shed rings
      strands.updateRoots(pose)         the margin the tentacles hang from
      guides.step / arms.step(dt, flow) the verlet substeps
-     camera.step(dt, swim.position)    the loose look-at
+     camera.step(dt, swim.position, swim.velocity)  the loose look-at
      snow.step(dt, camera.position)    advected by the same flow
 
    `updateRoots` BEFORE the substeps because the margin moves
@@ -467,7 +467,7 @@ export function createJellyfish(options = {}) {
       strands.packArms(arms.positions, simTime);
     }
 
-    camera.step(dt, swim.position);
+    camera.step(dt, swim.position, swim.velocity);
     snow.step(reducedMotion ? dt * REDUCED_SNOW_RATE : dt, camera.position, flow);
 
     /*
