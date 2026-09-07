@@ -121,6 +121,8 @@ import {
   SNOW_FOCAL_LENGTH,
   SNOW_APERTURE,
   SNOW_FOCUS_DISTANCE,
+  SNOW_FOCUS_MIN,
+  SNOW_FOCUS_MAX,
   SNOW_SENSOR_WIDTH,
   SNOW_MIN_PIXELS,
   SNOW_ALBEDO
@@ -444,6 +446,7 @@ const _camPos = [0, 0, 0];
 /* The oral arms' ribbon plane, and the zero that means "billboard" for the
    tentacles. Module scope, because the render path allocates nothing. */
 const _ribbonAxis = [0, 1, 0];
+let _snowFocus = SNOW_FOCUS_DISTANCE;
 const _noRibbonAxis = [0, 0, 0];
 const _worldOrigin = [0, 0, 0];
 const _lightEyeArray = [0, 0, 0];
@@ -704,7 +707,12 @@ export function createFrameGraph(gl, options = {}) {
     program.set('uCocScale', widthPx / (SNOW_SENSOR_WIDTH * overscanFactor));
     program.set('uF', SNOW_FOCAL_LENGTH);
     program.set('uN', SNOW_APERTURE);
-    program.set('uFocus', SNOW_FOCUS_DISTANCE);
+    // The lens focuses on its subject. `_snowFocus` is the distance to the
+    // animal, clamped to the range the lens can actually travel, so the motes
+    // drifting past it are sharp and the ones between the camera and the animal
+    // are honest bokeh -- which is the entire depth-of-field model in this
+    // renderer, and the reason there is no DoF pass anywhere.
+    program.set('uFocus', _snowFocus);
     program.set('uSnowMinPx', SNOW_MIN_PIXELS);
     program.set('uSnowAlbedo', SNOW_ALBEDO);
     program.texture('uSnowSprite', snowSprite);
@@ -787,6 +795,8 @@ export function createFrameGraph(gl, options = {}) {
     cookieDrift(_drift, view.causticTime);
 
     _bodyCentre.copyFrom(swim.position);
+    _snowFocus = Math.min(SNOW_FOCUS_MAX,
+      Math.max(SNOW_FOCUS_MIN, camera.position.distanceTo(_bodyCentre)));
 
     // The sun-space frame for the shadow render. An orthographic box is right
     // here: the sun is 14 m of water away and its rays are parallel for any

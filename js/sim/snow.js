@@ -64,10 +64,21 @@ export const SNOW_FIELDS = Object.freeze({
 });
 
 export const SNOW_CONSTANTS = Object.freeze({
+  /*
+   * §5.4's counts are per SHELL, and _generateStratum seeds directions with
+   * rng.unitVec3() over the whole sphere -- but a 38 degree lens at 1.7:1 sees
+   * 0.72 sr, which is 5.7 % of 4*pi. The shipped table therefore put about 52
+   * far motes, 24 mid and THREE near ones on screen, and the stratum §5.4 calls
+   * the strongest "this is a camera in water" cue in the frame was three discs.
+   * The counts below are the same table divided by that solid-angle fraction
+   * for the two strata the ladder never touches; `far` is left alone, because
+   * each far mote is a fraction of a per cent of contrast by the flux law and
+   * §7's ladder rows (900/450/200/0) are keyed to that number.
+   */
   STRATA: Object.freeze({
     far: Object.freeze({ count: 900, near: 12.0, far: 25.0, radius: [0.0004, 0.0018], brightness: [0.30, 0.80] }),
-    mid: Object.freeze({ count: 420, near: 4.0, far: 12.0, radius: [0.0005, 0.0025], brightness: [0.40, 0.95] }),
-    near: Object.freeze({ count: 60, near: 0.4, far: 2.5, radius: [0.0006, 0.0030], brightness: [0.45, 1.00] })
+    mid: Object.freeze({ count: 6000, near: 4.0, far: 12.0, radius: [0.0005, 0.0025], brightness: [0.40, 0.95] }),
+    near: Object.freeze({ count: 4000, near: 0.4, far: 2.5, radius: [0.0012, 0.0060], brightness: [0.45, 1.00] })
   }),
 
   /** §5.4: 0.9 cm/s sink. */

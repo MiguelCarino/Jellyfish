@@ -89,7 +89,19 @@ export const SNOW_FOCAL_LENGTH = 0.050;
 export const SNOW_APERTURE = 2.8;
 
 /** Focus distance in metres. §2.7: 6.0 m — the animal's working range. */
+/*
+ * Where the lens is focused when nothing tells it otherwise. The renderer does
+ * tell it otherwise: an operator filming this animal focuses ON the animal, so
+ * frame.js feeds the live camera-to-subject distance and this is the fallback
+ * and the clamp's midpoint. Focusing at a fixed 6 m while the subject swam
+ * around at 1.3-2.2 m put every near-stratum mote 30 pixels out of focus, and
+ * flux conservation then spread each one so thin that the stratum §5.4 calls
+ * the strongest cue in the frame came out at about one code value.
+ */
 export const SNOW_FOCUS_DISTANCE = 6.0;
+/** The range the focus is allowed to travel, in metres. */
+export const SNOW_FOCUS_MIN = 1.0;
+export const SNOW_FOCUS_MAX = 9.0;
 
 /** Sensor width in metres. §2.7: a 36 mm full-frame sensor. */
 export const SNOW_SENSOR_WIDTH = 0.036;
@@ -260,10 +272,10 @@ export const SNOW_SOFT_NORM = SNOW_SPRITE_MEAN / SOFT_KERNEL_MEAN;
  * capture harness can assert the near stratum really is landing in the 30-88 px
  * band §5.4 specifies.
  */
-export function snowCoCPixels(z, resX) {
+export function snowCoCPixels(z, resX, focus = SNOW_FOCUS_DISTANCE) {
   const f = SNOW_FOCAL_LENGTH;
-  const coc = (f / SNOW_APERTURE) * f * Math.abs(z - SNOW_FOCUS_DISTANCE) /
-              Math.max(z * (SNOW_FOCUS_DISTANCE - f), 1e-4);
+  const coc = (f / SNOW_APERTURE) * f * Math.abs(z - focus) /
+              Math.max(z * (focus - f), 1e-4);
   return coc * (resX / SNOW_SENSOR_WIDTH);
 }
 
