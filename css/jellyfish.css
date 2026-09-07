@@ -1,0 +1,53 @@
+/* jellyfish.css — Carino Jellyfish. The fleet design tokens plus the layout
+   contract for a page whose only content is one canvas. There is no UI here:
+   no overlay, no controls, no readout, no watermark. The gold brand in the
+   shared navbar is the only non-blue thing on screen, and "blue only" governs
+   the canvas, not the chrome. */
+:root{
+  --bg:#050505; --bg-elev:#0d0d0d; --bg-card:#0b0b0b;
+  --accent:#eab308; --accent-hi:#fbbf24;
+  --accent-faint:rgba(234,179,8,.05); --accent-glow:rgba(234,179,8,.15); --accent-dim:rgba(234,179,8,.3);
+  --border:#262626; --border-hi:#3a3a3a;
+  --text:#fff; --text-sec:#a3a3a3; --text-muted:#666;
+  --ok:#22c55e; --warn:#eab308; --err:#ef4444;
+  --sans:'IBM Plex Sans',system-ui,sans-serif; --mono:'IBM Plex Mono',ui-monospace,monospace; --display:'Red Hat Display',var(--sans);
+  --nav-h:60px;
+  --sea-veil:#04070E;          /* the far-field floor. There is no black underwater. */
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;}
+
+/* carino-navbar.js injects itself as the first child of <body> in normal flow,
+   60px tall with flex-shrink:0. So the column does the arithmetic and nothing
+   here needs to know the navbar's height: no padding-top, no top offset, no
+   calc(100vh - 60px) that goes wrong the moment the navbar changes. */
+body{background:var(--bg);color:var(--text);font-family:var(--sans);
+     display:flex;flex-direction:column;overflow:hidden;}
+
+/* min-height:0 is mandatory, or the canvas pushes the page. */
+#sea{flex:1 1 auto;min-height:0;position:relative;background:var(--bg);}
+
+/* The canvas is sized in CSS pixels here and given its backing store separately
+   by js/main.js at the scene render scale, so the browser never bilinearly
+   upscales the frame. It fades up over 1.2s from the page ground while the
+   programs compile — which reads as descending into water rather than as
+   loading, and is why there is no spinner. */
+#sea canvas{position:absolute;inset:0;width:100%;height:100%;display:block;
+            opacity:0;transition:opacity 1.2s ease-out;}
+#sea canvas.ready{opacity:1;}
+
+/* The navbar seam. The top of the frame is the BRIGHTEST part of the water, so
+   crushing the render to #050505 to hide the join would be physically wrong.
+   Instead the nav's own ground is carried 28px into the water. */
+#sea::before{content:"";position:absolute;left:0;right:0;top:0;height:28px;
+             pointer-events:none;z-index:1;
+             background:linear-gradient(180deg,#050505 0%,rgba(5,5,5,0) 100%);}
+
+/* Reduced motion is answered in the renderer, not here: the swim cycle freezes
+   mid-relaxation, the strands fall back to retarded-time sway at 15%, and the
+   grain, dither and exposure keep breathing, so the image is still alive. All
+   CSS has to do is stop the one animation it owns — a 1.2s fade the visitor did
+   not ask for — and show the first frame outright. */
+@media (prefers-reduced-motion: reduce){
+  #sea canvas{transition:none;opacity:1;}
+}

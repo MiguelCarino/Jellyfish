@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!-- logo.svg is the icon wherever an SVG favicon is honoured; logo.webp is the
+     256px raster behind it, rasterised from that same SVG so the two cannot
+     disagree about the artwork. §8 lists both as the page's only binary assets. -->
+<link rel="icon" type="image/svg+xml" href="logo.svg" />
+<link rel="alternate icon" type="image/webp" href="logo.webp" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Jellyfish — Carino Systems</title>
+<meta name="description" content="A moon jelly, swimming. Ambient WebGL." />
+<meta name="theme-color" content="#050505" />
+<!-- Manifest only, deliberately no service worker: a hand-maintained precache
+     list on a no-build static host strands users on a stale bundle. -->
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="stylesheet" href="fonts/carino-fonts.css" />
+<link rel="stylesheet" href="css/jellyfish.css" />
+</head>
+<body>
+  <!-- The entire document. There is no header.cs-header, no overlay, no control
+       and no readout, and that absence is structural rather than cosmetic: with
+       nothing for carino-navbar.js's relocateActions() to move, its right cluster
+       holds only .social-row, and `.social-row:not(:only-child)` correctly drops
+       the divider. An empty actions wrapper would draw that divider forever.
+
+       The navbar is injected as the first child of <body> in normal flow — 60px
+       plus a 1px border, box-sizing:border-box, flex-shrink:0 — so the fleet
+       layout contract applies unchanged: body is a 100% flex column and #sea
+       takes the remainder. Never padding-top:60px, never top:60px. -->
+  <main id="sea"><canvas id="gl"></canvas></main>
+
+  <!-- js/main.js first, then the navbar: a module and a deferred classic script
+       both run after parsing, in document order, so the renderer has claimed the
+       canvas and armed its ResizeObserver before the navbar inserts itself and
+       takes 61px off #sea. The observer sees that as an ordinary resize. -->
+  <script type="module" src="js/main.js"></script>
+  <script src="carino-navbar.js" data-app="Jellyfish" data-repo="Jellyfish" defer></script>
+</body>
+</html>
