@@ -40,17 +40,19 @@ the red absorption coefficient visibly reddens the animal, which is the test.
 **The jelly is lit by its own thickness.** A signed additive buffer accumulates
 optical depth along the view ray through every layer of tissue at once — both
 walls of the bell, an arm folded underneath, a tentacle behind — encoded relative
-to the bell's front depth so that a 6 mm wall is hundreds of ulps of fp16 instead
-of three. Tissue density is a pattern, not a constant: the coronal muscle ring,
+to the bell's front depth so that a centimetre of wall is hundreds of ulps of
+fp16 instead of three. Tissue density is a pattern, not a constant: the coronal muscle ring,
 sixteen radial canals and four gonad horseshoes all sum into it, so they show
 *through* the bell exactly as they do in a photograph. The luminous rim is that
 integral at grazing incidence, not a Fresnel term; a real jellyfish has almost no
 Fresnel reflection, which is precisely why it is nearly invisible in water.
 
-**The exumbrella composites the scene through itself.** It is drawn last and
-refracts the water column behind it with a real march distance and a touch of
-Cauchy dispersion, so the subumbrella, gonads and far tentacles are not merely
-occluded by the bell — they are tinted, dimmed and bent by it.
+**The near shell composites the scene through itself.** Whichever half of the
+bell is facing the camera — the exumbrella from above, the subumbrella when the
+orbit swings underneath — is drawn last and refracts the water column behind it
+with a real march distance and a touch of Cauchy dispersion, so the far shell,
+the gonads and the far tentacles are not merely occluded by the bell: they are
+tinted, dimmed and bent by it.
 
 **One caustic texture lights everything.** The godray march, the ripple crawling
 over the bell and the twinkle on a passing snow mote are the same fetch, so they
@@ -75,6 +77,27 @@ while you are looking at it.
 arms streaming, drops the strands to a stateless retarded-time sway and stops the
 camera, but leaves the grain, dither and exposure alive. A still image, not a
 dead one.
+
+## Where this departs from SPEC.md
+
+`SPEC.md` is the build spec, and it is authoritative about intent. These are the
+places the shipped renderer disagrees with its numbers, every one of them
+because the frame measured wrong against the spec's own acceptance checks.
+
+| Subject | Spec | Ships | Why |
+| --- | --- | --- | --- |
+| Ambient in-scatter | a flat `0.75` in place of a phase function | `hg(0, 0.62) = 0.030` | The veil is a radiance, and the shafts, the snow and the animal are all lit from `downwelling()` directly. At 0.75 the water was twenty five times too bright and everything in the frame sat a few per cent above it. |
+| Post chain | no scene-referred exposure | `SCENE_EXPOSURE`, on `hdrDecode` | `SUN_E0` is scene-referred and AgX puts middle grey at 0.18, so the column arrived several stops into the shoulder and landed near white. |
+| Mesoglea | `WALL_A` 0.058 R, `SIG_S_G` (14, 16.5, 19) | 0.120 R, (22, 26, 30) | 7.5 mm over the apex of a 26 cm animal scattered under nine per cent of the light reaching it. §5.5's anchors put the lit bell three to four times above the column; this is what gets it there. |
+| Passes 5 and 6 | subumbrella, then exumbrella | far shell, then near shell | The orbit spends long stretches below the animal, and the pinned version culled every visible triangle of the shell facing the eye. |
+| Oral arms | 0.9 R wide, one strand shader | 0.42 R, plus a coverage term and their own ribbon plane | The shader read a ribbon's width as its depth, so the arms rasterised as opaque camera-facing sails in front of the bell. |
+| Camera | 1.9–3.2 m orbit | 1.3–2.2 m, and each spring leads by its own tau | A 26 cm animal at 2.55 m is 15 % of the frame height, and a spring following a swimmer trails it by `v*tau` — half a metre, measured, which walked the animal to the frame edge. |
+| Marine snow | §5.4's counts, focus at 6 m | mid and near counts divided by the frustum's solid-angle fraction, focus on the animal | The counts are seeded over a full sphere, of which a 38° lens sees 5.7 %: three near motes reached the screen, thirty pixels out of focus. |
+
+Everything else is the spec as written, including the parts that are easy to
+mistake for bugs: the ±0.25 EV exposure clamp, the fixed forty tentacles, the
+2.5 caustic softening exponent, and the fact that nothing in the render path
+contains a blue constant.
 
 ## Setup
 
