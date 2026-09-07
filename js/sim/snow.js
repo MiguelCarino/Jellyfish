@@ -78,7 +78,17 @@ export const SNOW_CONSTANTS = Object.freeze({
   STRATA: Object.freeze({
     far: Object.freeze({ count: 900, near: 12.0, far: 25.0, radius: [0.0004, 0.0018], brightness: [0.30, 0.80] }),
     mid: Object.freeze({ count: 6000, near: 4.0, far: 12.0, radius: [0.0005, 0.0025], brightness: [0.40, 0.95] }),
-    near: Object.freeze({ count: 4000, near: 0.4, far: 2.5, radius: [0.0012, 0.0060], brightness: [0.45, 1.00] })
+    /*
+     * `background` overrides CLUSTER_BACKGROUND for this stratum only. A
+     * Thomas process is right for particulate at range, but the near shell is
+     * only 2.1 m thick and the clumps are larger than the band: measured in a
+     * 30 degree cone over two minutes, the count of near motes in view swung
+     * between 14 and 493 on a ten-second beat as one drift or another crossed
+     * the frustum, so the strongest cue in the frame came and went. Three
+     * quarters uniform keeps the drifts visible without letting the near field
+     * empty out.
+     */
+    near: Object.freeze({ count: 4000, near: 0.4, far: 2.5, radius: [0.0012, 0.0060], brightness: [0.45, 1.00], background: 0.75 })
   }),
 
   /** §5.4: 0.9 cm/s sink. */
@@ -294,6 +304,7 @@ export class SnowField {
     const rng = st.rng;
     const live = st.spec.count;
     const clusterCount = Math.max(4, Math.round(live / K.CLUSTER_SIZE));
+    const background = st.spec.background === undefined ? K.CLUSTER_BACKGROUND : st.spec.background;
 
     const seedDir = new Float32Array(clusterCount * 3);
     const seedRadius = new Float32Array(clusterCount);
@@ -310,7 +321,7 @@ export class SnowField {
      */
     const membership = new Array(live);
     for (let i = 0; i < live; i++) {
-      membership[i] = rng.float() < K.CLUSTER_BACKGROUND ? -1 : rng.int(clusterCount);
+      membership[i] = rng.float() < background ? -1 : rng.int(clusterCount);
     }
     rng.shuffle(membership);
 
@@ -456,7 +467,10 @@ export class SnowField {
     const b = i * SNOW_STRIDE;
 
     let dx, dy, dz;
-    if (live > 1 && rng.float() < K.CLUSTER_RESPAWN_FRACTION) {
+    const clusterRespawn = st.spec.background === undefined
+      ? K.CLUSTER_RESPAWN_FRACTION
+      : K.CLUSTER_RESPAWN_FRACTION * (1 - st.spec.background) / (1 - K.CLUSTER_BACKGROUND);
+    if (live > 1 && rng.float() < clusterRespawn) {
       let j = rng.int(live);
       if (j === i) j = (j + 1) % live;
       const nb = j * SNOW_STRIDE;
