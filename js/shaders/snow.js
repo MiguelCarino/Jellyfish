@@ -375,8 +375,18 @@ void main(){
   // use, at the mote's own true depth.
   float wy    = seaDepth(aSnowPos);
   float phase = SNOW_PHASE_NORM * hg(dot(rd, -uSunDir), SNOW_PHASE_G);
-  vec3  lit   = uSnowAlbedo * aSnowParam.y
-              * (downwelling(wy) * causticAt(aSnowPos) * phase + inscatter(wy));
+  // The albedo and the floc's own brightness scale the SUNLIGHT it catches and
+  // nothing else. A floc is a water-logged aggregate that displaces sea water,
+  // so it cannot send the eye less than the water standing in its place, and the
+  // sprite composites as an OCCLUDER -- a mote dimmer than the column behind it
+  // does not read as a particle, it reads as a hole. With the albedo on the
+  // ambient term too, the ambient was cut to as little as 0.24 of the medium's
+  // own radiance, and bounding the alpha alone still left dark bokeh discs in
+  // open water at 0.61 of the water they were drawn over. waterApply() is
+  // monotone in its first argument, so writing it this way makes the mote's
+  // colour at least inscatter(wy) per channel by construction.
+  vec3  lit   = uSnowAlbedo * aSnowParam.y * downwelling(wy) * causticAt(aSnowPos) * phase
+              + inscatter(wy);
 
   vColor    = waterApply(lit, zRad, wy);
   vCoverage = cover;
@@ -418,10 +428,24 @@ void main(){
   float soft = s * s * SNOW_SOFT_NORM;
 
   float profile = mix(texture(uSnowSprite, vSprite).r, soft, vSoft);
-  float a = vCoverage * profile;
+
+  // Two numbers, not one. The flux weight w is allowed past 1: SNOW_SOFT_NORM
+  // renormalises the smooth kernel to the SPRITE'S MEAN so the crossfade costs
+  // sharpness and never brightness, and that puts the smooth kernel's peak at
+  // 2.3004. Handed to the blender as an alpha it makes the destination term
+  // 1 - 2.3 = -1.3 and subtracts more background than there is, so a mote whose
+  // own radiance sat under the column behind it landed at or below zero: the
+  // frame's darkest pixels were marine snow rendering as holes, measured at
+  // 4 per cent of the water around them in open water on the float path. (The
+  // RGBA8 path never had this; a fixed-point target clamps the source alpha for
+  // us.) An occluder cannot remove more than the background, so the opacity is
+  // bounded by one, while the colour keeps the unbounded weight and the flux
+  // normalisation the crossfade depends on is untouched.
+  float w = vCoverage * profile;
+  float a = min(w, 1.0);
   if (a < SNOW_ALPHA_EPSILON) discard;
 
-  fragColor = vec4(vColor * a * OUT_GAIN, a);   // premultiplied
+  fragColor = vec4(vColor * w * OUT_GAIN, a);   // premultiplied
 }
 `;
 

@@ -89,6 +89,18 @@ export const CAMERA_CONSTANTS = Object.freeze({
   /** §4.5: "a very loose spring". */
   LOOK_TAU: 5.0,
 
+  /*
+   * How far below the animal's centre the rig aims, in metres — one bell
+   * radius, and it has to be re-derived if geometry/profile.js's BELL_RADIUS
+   * ever moves. `swim.position` is the bell's centre, but the animal's visible
+   * mass is not: the forty tentacles and four oral arms put its lowest lit node
+   * 0.20 m below that centre in the mean and 0.47 m at worst, so aiming at the
+   * centre hangs the fringe out of the bottom of the frame — measured, off the
+   * bottom edge in 3.6 % of frames — and leaves the top half of it empty water.
+   * 0.13 is the smallest drop that takes that clipping to zero.
+   */
+  FRAMING_DROP: 0.13,
+
   /* --- The wandering look-at error ---------------------------------- */
   /* Scaled with the orbit radius above, so the drift subtends the same angle
      it always did: 0.11 / 1.75 is 0.14 / 2.55. LOOK_ERROR_MAX is what the
@@ -291,22 +303,37 @@ export class Camera {
       : this.target.clone();
 
     /*
-     * A first-order spring following a moving subject sits a steady v*tau
-     * BEHIND it, and this subject moves: the animal surges at about 0.1 m/s,
-     * so the tau = 5 s look spring trailed it by half a metre and the tau =
-     * 1.8 s rig by a fifth of one. Measured over a minute that was 0.29 of a
-     * half-frame off centre on average and 0.54 at worst, with the animal
-     * walking steadily toward the edge and the rig falling half a metre
+     * A spring following a moving subject sits a steady distance BEHIND it, and
+     * this subject moves: the animal surges at 0.086 m/s in the mean, so the
+     * look spring trailed it by most of a metre and the rig by a third of one,
+     * which walked the animal steadily toward the frame edge and left the rig
      * further back than the orbit radius it was asked for. Leading each spring
-     * by its own tau cancels exactly that term and nothing else -- it is what
-     * an operator panning with a subject does, and it leaves the wandering
-     * look error below as the only thing moving the animal around the frame.
-     * The lead is filtered by the very spring it feeds, so the swim cycle's
-     * own surge and coast comes through as under two centimetres of drift.
+     * by the subject's velocity cancels exactly that term and nothing else --
+     * it is what an operator panning with a subject does.
+     *
+     * The SIZE of the lead is set by the integrator rather than by taste.
+     * `springStep` is critically damped and SECOND-order, and a second-order
+     * spring following a ramp settles TWO time constants behind it, so the
+     * lead is 2*tau. At one tau half the lag survived: 0.41 m on the look
+     * spring over 400 s, which is 16.8 degrees of angular offset inside a 19
+     * degree half-frame, with the bell crossing the bottom edge on the tightest
+     * orbits. At 2*tau the residual is 0.12 m and 5.5 degrees, which leaves the
+     * wandering look error below as the only thing moving the animal around the
+     * frame. The lead is filtered by the very spring it feeds, so the swim
+     * cycle's own surge and coast comes through as under two centimetres of
+     * drift.
+     *
+     * FRAMING_DROP then aims the look spring a bell radius low, which puts the
+     * bell in the upper third with the fringe through the middle instead of the
+     * bell in the middle with the fringe off the bottom. Being a constant
+     * offset it adds no motion, and it can only tilt the rig DOWN: the highest
+     * look elevation seen over 400 s falls from 14.4 degrees to 9.1, further
+     * under the 25 degree anti-flare limit the constructor asserts.
      */
     const velocity = targetVelocity ? Vec3.from(targetVelocity) : null;
-    const rigCentre = velocity ? centre.addScaled(velocity, K.POSITION_TAU) : centre;
-    const lookCentre = velocity ? centre.addScaled(velocity, K.LOOK_TAU) : centre;
+    const rigCentre = velocity ? centre.addScaled(velocity, 2 * K.POSITION_TAU) : centre;
+    const aim = velocity ? centre.addScaled(velocity, 2 * K.LOOK_TAU) : centre;
+    const lookCentre = new Vec3(aim.x, aim.y - K.FRAMING_DROP, aim.z);
 
     this._advanceSun();
     const desired = this._orbitPosition(rigCentre);

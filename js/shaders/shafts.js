@@ -51,9 +51,10 @@
    resize or a tab wake genuinely does move the camera.
 
    WHAT THIS ACTUALLY LOOKS LIKE, MEASURED. The shaft-to-veil
-   ratio is not a free parameter: it is c * hg(theta) / 0.75,
-   where 0.75 is the flat factor §2.0's inscatter() uses in place
-   of a phase function. With the caustic gobo normalised to mean 1
+   ratio is not a free parameter: it is c * hg(theta) / 0.030,
+   where 0.030 is the phase factor §2.0's inscatter() carries --
+   which is hg(0, 0.62), so the ratio is c wherever the view ray
+   runs at ninety degrees to the sun. With the caustic gobo normalised to mean 1
    and peaking near 6, and with §4.5 clamping the camera to 25
    degrees of elevation so the sun is never behind the subject,
    the brightest reachable filament lands about 1.4x the local

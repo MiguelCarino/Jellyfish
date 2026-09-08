@@ -324,7 +324,37 @@ void main(){
   vec3 shadowG = shadowTransmittance(vWorldPos, 0.5 - 0.5 * dot(N, L));
 
   // (1) MULTIPLE SCATTERING: light that entered and did not get through.
-  vec3 ms = alb * (1.0 - Tr) * wrapDiffuse(N, L, 0.65) * sunCol * shadowG;
+  //     sunCol is an IRRADIANCE and what leaves the tissue towards the eye is a
+  //     RADIANCE, so this diffuse lobe carries the 1/PI every diffuse BRDF
+  //     carries. It was the last term in the project doing that conversion by
+  //     hand: inscatter() normalises by hg(0), the single scattering below by
+  //     hg(), the strands by hg(), and this one by nothing. Measured, it is
+  //     about a third of the animal's pixel, so correcting it drops the lit
+  //     dome 32 % and the margin 25 % -- the emitted pedestal falls while the
+  //     refracted background underneath it does not, which is what turns the
+  //     bell from a lit cap back into glass. Same irradiance-for-radiance slip
+  //     that came out of inscatter(), in the last place it was left.
+  //
+  //     The LOBE is two-sided, and that is what makes the gonads and the canals
+  //     read at all. Multiply scattered light has forgotten where the sun was:
+  //     the thicker the tissue the more of it leaves through whichever face the
+  //     eye is on, so the wrap lobe alone -- which returns exactly zero for a
+  //     surface tipped more than 0.65 away from the light, and the organs hang
+  //     UNDER a bell lit from above -- left every dense structure in the animal
+  //     with no key light whatsoever. Every other term that could have lit them
+  //     carries Tr, which is what collapses when tissue gets dense, so they
+  //     came out darker than the water behind them: dark slots where §5.5 puts
+  //     the brightest tissue in the frame. Mixing toward the mean of the near
+  //     and far lobes by the scattered fraction has the right limits at both
+  //     ends -- a wafer-thin margin keeps the plain wrap it always had, and a
+  //     slab thick enough to hide the water behind it emits the same either
+  //     way, which is what "multiply scattered" means.
+  float lobeNear  = wrapDiffuse(N, L, 0.65);
+  float lobeFar   = wrapDiffuse(-N, L, 0.65);
+  float scattered = 1.0 - dot(Tr, vec3(0.3333333));
+  float lobe      = mix(lobeNear, 0.5 * (lobeNear + lobeFar), scattered);
+
+  vec3 ms = alb * (1.0 - Tr) * lobe * sunCol * shadowG / PI;
 
   // (2) SINGLE SCATTERING: forward-peaked. g is 0.72, and the peak is CAPPED --
   //     this is the term that produced the periodic flare the calm judge flagged.
@@ -334,8 +364,20 @@ void main(){
   // (3) AMBIENT: analytic water dome, no cubemap, no asset, no network. The N.y
   //     weighting is what stops the subumbrellar cavity flooding back in after
   //     the shadow term has just darkened it.
+  //
+  //     The 0.6 that used to close this line was an occlusion guess, and it put
+  //     dense tissue BELOW the medium it displaces: mesoglea is sea water with
+  //     a little collagen in it, single-scattering albedo 0.98, so a slab thick
+  //     enough to hide the water behind it (Tr -> 0) returns very nearly the
+  //     radiance that water was sending, and it cannot return 60 % of it. The
+  //     visible cost was the gonad horseshoes, the canals and the manubrium
+  //     rendering as dark slots inside the bell -- the denser the tissue, the
+  //     darker the mark, which is backwards. Dropping the factor bounds them
+  //     from below by the water instead, and because the term carries (1 - Tr)
+  //     it is worth almost nothing on the thin dome and everything on the
+  //     organs, which is the direction §5.5's anchors ask for.
   vec3 amb = mix(inscatter(vWorldY - 0.6), inscatter(vWorldY + 0.6), N.y*0.5 + 0.5)
-           * alb * (1.0 - Tr) * 0.6;
+           * alb * (1.0 - Tr);
 
   // F0 = 4e-4 stands in for the surface mucus film ONLY -- 10x physical, which is
   // as far as this is allowed to go. NO anisotropic ribbon, NO bloom on it:
@@ -383,10 +425,22 @@ void main(){
   float ok = step(0.0, min(uvR.x, uvR.y)) * step(max(uvR.x, uvR.y), 1.0);
   bg = mix(seaTap(uvS), bg, ok);
 
-  col += bg * Tr;
+  // SEA is a render from THIS eye, so the tap already carries the water between
+  // the animal and the camera. Handing the sum to waterApply() fogs that
+  // stretch a second time. On flat water the two forms are algebraically the
+  // same -- waterApply(L, d, y) is the identity when L is inscatter(y) -- which
+  // is how it survived, but anything that DEPARTS from the veil loses
+  // exp(-SIG_T_W*dist) of its contrast behind the bell, and a light shaft that
+  // dies at the silhouette is the loudest possible statement that the animal is
+  // opaque. Subtracting the near segment's haze before the multiply takes back
+  // that stretch and nothing else: at Tr = 1 the whole expression collapses to
+  // bg, so a wafer-thin margin now leaves the water behind it untouched instead
+  // of stamping a step into it.
+  vec3 haze = inscatter(vWorldY) * (1.0 - exp(-SIG_T_W * vViewDist));
 
   float coverage = 1.0;
-  fragColor = vec4(waterApply(col, vViewDist, vWorldY) * coverage * OUT_GAIN, coverage);
+  vec3  outC = waterApply(col, vViewDist, vWorldY) + (bg - haze) * Tr;
+  fragColor  = vec4(outC * coverage * OUT_GAIN, coverage);
 #endif
 }
 `;

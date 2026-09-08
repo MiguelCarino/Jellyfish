@@ -100,7 +100,13 @@ export const POST_CONSTANTS = Object.freeze({
   /* Sensor shot + read noise, pre-tonemap, in linear HDR. */
   NOISE_SHOT: 0.010,
   NOISE_READ: 0.0016,
-  NOISE_CHROMA: 0.0030,
+  /* Chroma noise as a MULTIPLE of the shot-plus-read sigma computed beside it,
+     not an absolute level. A demosaicked sensor's chroma noise is the same
+     photon statistics as its luma noise, so one is the physical default; at the
+     open water's own signal level it evaluates to 0.0032, which is where the old
+     absolute 0.0030 sat. This is a change of units and of spatial character, not
+     of amplitude. */
+  NOISE_CHROMA: 1.0,
 
   /* Scene-referred to display-referred: the one fixed stop the chain was
      missing. SUN_E0 is an irradiance in arbitrary units and AgX puts middle
@@ -109,7 +115,16 @@ export const POST_CONSTANTS = Object.freeze({
      blue ratio with it. This is NOT a grade -- it is one scalar on all three
      channels, the sensor's ISO, and it is what makes BLOOM_THRESHOLD,
      VEIL_WEIGHT and the noise floor below mean anything at all. The +-0.25 EV
-     meter trims it; it does not replace it. */
+     meter trims it; it does not replace it -- and today it does not trim it
+     either. The meter is fed by the bright pass, almost nothing in the frame
+     crosses a 1.15 knee, so it reads ~0 against a key of 0.020 and asks for its
+     positive clamp on every frame. The effective stop is therefore 1.19x the
+     number here, and 1.19x is what §5.5's anchors were measured against;
+     forcing EXPOSURE_EV_CLAMP to zero darkens the median pixel by 5 per cent,
+     which is that quarter stop coming back out. Anyone who later gives the
+     scene a real top end should expect the frame to hand that quarter stop
+     back as the meter comes off its rail -- bounded, tau 3 s and rate-limited,
+     so a slow drift and not a pump. */
   SCENE_EXPOSURE: 0.20,
 
   /* Auto-exposure. Clamped far tighter than a game's eye adaptation: a periodic
@@ -509,9 +524,23 @@ void main(){
   // §6 step 5. Shot noise scales with sqrt(signal) and read noise is a floor,
   // so the grain is loudest in the shadows -- which is where a real high-ISO
   // underwater frame keeps it. gaussIGN wants PIXEL coordinates, not UVs.
-  float n1 = gaussIGN(gl_FragCoord.xy, uFrame);
-  c += n1 * (sqrt(max(c.g, 0.0)) * NOISE_SHOT + NOISE_READ);
-  c.rb += gaussIGN(gl_FragCoord.xy * 0.25, uFrame + 7.0) * NOISE_CHROMA;
+  float sigma = sqrt(max(c.g, 0.0)) * NOISE_SHOT + NOISE_READ;
+  c += gaussIGN(gl_FragCoord.xy, uFrame) * sigma;
+
+  // The chroma tap is on the SAME pixel lattice as the luminance tap, with the
+  // lanes swapped. It used to be taken at gl_FragCoord * 0.25, reaching for the
+  // demosaic's correlation length, and ign() cannot be asked for that: it is a
+  // low-discrepancy sequence over pixel coordinates, so quartering the argument
+  // makes the field SMOOTH rather than fine. Measured over a 200 px grid it
+  // carries +0.91 autocorrelation at lag (1,1) and +0.75 at (1,0) -- a four
+  // pixel blob field laid over r and b across the whole frame, which is what
+  // read as canvas weave in open water. Swapping the lanes gives the luma tap's
+  // own structure transposed (-0.69 at (1,0) against the luma tap's -0.69 at
+  // (0,1)) at -0.03 correlation with it, so the two are independent realisations
+  // of one grain. Riding sigma also makes the chroma scale with the signal,
+  // which a flat term in linear HDR did not: open water carries about 3e-5 in
+  // red, four decades under blue.
+  c.rb += gaussIGN(gl_FragCoord.yx, uFrame + 7.0) * sigma * NOISE_CHROMA;
 
   c = agx(max(c, vec3(0.0)));
   c = blueGuard(c);
