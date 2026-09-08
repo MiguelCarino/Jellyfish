@@ -385,7 +385,21 @@ void main(){
   // open water at 0.61 of the water they were drawn over. waterApply() is
   // monotone in its first argument, so writing it this way makes the mote's
   // colour at least inscatter(wy) per channel by construction.
-  vec3  lit   = uSnowAlbedo * aSnowParam.y * downwelling(wy) * causticAt(aSnowPos) * phase
+  //
+  // The caustic enters as a BOUNDED key, exactly as it does on the bell. A mote
+  // samples causticAt() at a single point and the field is ridged noise with
+  // deep nulls, while the shaft it is standing in is that same field integrated
+  // along the whole view ray -- so the beam stays lit where the point does not.
+  // A mote that landed in a null lost its entire key and fell to the floor
+  // below, which sits under the shaft behind it: measured, seven motes a frame
+  // at up to 46 % of the water they were drawn over, which reads as a hole and
+  // not as particulate. The caustic modulates the direct beam and not the
+  // diffuse field that carries most of the light at 14 m, so a null cannot take
+  // the key to zero. 0.6 is deeper than the bell's CAUSTIC_AMPLITUDE because a
+  // floc is a point where the bell averages the field over 26 cm, and it leaves
+  // the twinkle §5.3 asks for intact.
+  vec3  lit   = uSnowAlbedo * aSnowParam.y * downwelling(wy)
+              * mix(1.0, causticAt(aSnowPos), 0.6) * phase
               + inscatter(wy);
 
   vColor    = waterApply(lit, zRad, wy);

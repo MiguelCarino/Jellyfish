@@ -91,6 +91,7 @@
 
 import { CAUSTIC_GLSL } from './cookie.js';
 import { VIEW_RAY_GLSL, SHAFT_MARCH_GLSL, SHAFT_BILATERAL_SHARPNESS } from './shafts.js';
+import { NOISE_GLSL } from '../noise.js';
 
 /**
  * Where the analytic column stops integrating, in metres. Only the
@@ -226,7 +227,23 @@ void main(){
   col += SUN_E0 * SNELL_GAIN * smoothstep(SNELL_EDGE0, SNELL_EDGE1, rd.y);
 
 #ifdef SEA_INLINE_SHAFTS
-  col += marchShafts(uCamPos, rd, ign(gl_FragCoord.xy + uFrame * 7.0)).rgb;
+  // §2.2's interleaved gradient noise is the right jitter for the buffered
+  // march and the wrong one here. There it is filtered twice after the fact --
+  // shafts.js blends every frame against uHistory, and upsampleShafts() above
+  // is a bilateral -- so ign()'s low discrepancy buys the sample coverage it is
+  // meant to and its structure never reaches the frame. Inline there is no
+  // history and no upsample, eight steps land raw, and what a low-discrepancy
+  // sequence leaves raw is a lattice rather than grain. Tier 4 then renders at
+  // RS 0.83 and magnifies that lattice 1.2x into a five-pixel beat against the
+  // pixel grid: measured in the frozen reduced-motion frame, open water carried
+  // 4.01 LSB of high-frequency residual against 1.25 at tier 1, and it read as
+  // the same canvas weave the sensor chroma in post.js was already fixed for.
+  // hash12() carries the same variance with no lattice to alias, which takes
+  // the residual's anti-diagonal autocorrelation from an oscillating +-0.36 to
+  // a monotone decay under 0.11. The amplitude is not the problem and must not
+  // be touched: dropping the jitter to a constant does take the residual to
+  // 1.31 LSB, and puts §2.2's ray banding back as hard steps in the shafts.
+  col += marchShafts(uCamPos, rd, hash12(gl_FragCoord.xy + uFrame * 7.0)).rgb;
 #else
   col += upsampleShafts(vUV);
 #endif
@@ -245,6 +262,8 @@ export const SEA_INCLUDES = Object.freeze([VIEW_RAY_GLSL]);
  * Includes for the tier-4 / RGBA8 path. Build with
  * `defines: { SEA_INLINE_SHAFTS: true, SHAFT_STEPS: 8 }` and bind the caustic
  * uniforms (uCookie, uCookieScale, uCookieDrift, uSunDir, uWorldOrigin) as well
- * as uFrame.
+ * as uFrame. NOISE_GLSL is here only for hash12(), which is the march jitter on
+ * this path and nowhere else; see the SEA_INLINE_SHAFTS branch above for why the
+ * buffered path keeps ign() and this one cannot.
  */
-export const SEA_INLINE_INCLUDES = Object.freeze([CAUSTIC_GLSL, VIEW_RAY_GLSL, SHAFT_MARCH_GLSL]);
+export const SEA_INLINE_INCLUDES = Object.freeze([NOISE_GLSL, CAUSTIC_GLSL, VIEW_RAY_GLSL, SHAFT_MARCH_GLSL]);

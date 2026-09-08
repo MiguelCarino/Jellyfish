@@ -267,8 +267,16 @@ void main(){
   vec3 alb = gelAlbedo();
   vec3 shadowG = shadowTransmittance(vWorldPos, STRAND_SHADOW_FRACTION);
 
+  // The ambient term is the water's own radiance, undiminished. It used to
+  // carry a 0.5, and that is the slip the exumbrella's ambient dome had in its
+  // 0.6: a strand's cross-section IS its opacity here, so at the spine the
+  // ribbon replaces the column behind it outright, and mesoglea -- sea water
+  // with a little collagen in it -- cannot return half the radiance of the
+  // water standing in its place. The visible cost was that every tentacle
+  // crossing the bell stamped a dark line into it, 52 % below the tissue
+  // around it, which is what made forty threads read as forty wires.
   vec3 sc = alb * uSunCol * hg(dot(-L, V), 0.55) * vDensity * shadowG
-          + inscatter(vWorldY) * 0.5;
+          + inscatter(vWorldY);
   vec3 col = waterApply(sc, vViewDist, vWorldY);
   fragColor = vec4(col * a * OUT_GAIN, a);          // premultiplied
 }

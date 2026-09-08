@@ -304,9 +304,40 @@ void main(){
   float tau  = 2.0 * vWall * rho / ndv;
   float dGeo = 2.0 * vWall / ndv;
 #else
+  // THE DENSITY IS APPLIED HERE, NOT INSIDE THE SUM, and the reason is the
+  // whole of the dark-organ artefact. Pass 4's G channel is the GEOMETRIC path
+  // through every layer on this ray and it is exact: with the density factored
+  // out, every front face cancels its own back face and the telescoping is
+  // unconditional. The R channel is not. It accumulates s*d*rho with d measured
+  // from the bell's front depth, and that only telescopes when the two faces of
+  // a crossing report the SAME rho -- which they cannot, because density() is a
+  // map of the anatomy and an oblique ray enters a wall at one (phi, theta) and
+  // leaves it at another. What survives is (rho_out - rho_in) * d_in, and for
+  // the FAR wall of the animal d_in is the whole body depth, about 0.16 m,
+  // rather than the 14 mm of wall the term is meant to weigh: a mismatch of one
+  // in rho -- a canal, a gonad horseshoe, the coronal ring's smoothstep -- lands
+  // an error of 0.16 on an optical depth whose true value is 0.05. Traced
+  // against the exact integral over a grid of rays through the bell, R carries
+  // 51 % mean absolute error, runs 50 % high on average, and goes NEGATIVE
+  // wherever a dense feature falls on the far subumbrella and not on the far
+  // exumbrella -- at which point the max() below clamps it to zero and the
+  // animal is simply not there at that pixel. That is what the dark slots inside
+  // the dome were. Not shading, not the shadow term, not dense tissue rendering
+  // dark: the optical depth cancelling itself out exactly where section 5.5 puts
+  // the brightest tissue in the frame.
+  //
+  // rho * dGeo is what the ANALYTIC_THICKNESS branch above has always computed,
+  // so the two branches now differ only in that this one MEASURES the path
+  // instead of assuming one planar wall -- which is the part of section 2.4
+  // worth having, since a tentacle behind the bell and an arm folded under it
+  // still add their length to dGeo and still darken what is behind them. Traced
+  // the same way it carries 7 % mean absolute error, 1 % bias and no negatives.
+  // Pass 4 still writes R because the same fragment stage renders the sun-side
+  // map, which reads it as a light-space optical depth.
   vec2  th   = max(sampleThick(uvS), vec2(0.0));   // clamp precision noise
-  float tau  = min(th.x, ${THICK_TAU_CLAMP.toFixed(2)});   // hard clamp: an unsealed rim must not blow out
   float dGeo = min(th.y, ${THICK_GEO_CLAMP.toFixed(2)});
+  // hard clamp: an unsealed rim must not blow out
+  float tau  = min(dGeo * rho, ${THICK_TAU_CLAMP.toFixed(2)});
 #endif
 
   // ---- Beer-Lambert with similarity theory ------------------------------
