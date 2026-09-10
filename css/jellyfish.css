@@ -1,7 +1,12 @@
-/* jellyfish.css — Carino Jellyfish. The fleet design tokens plus the layout
-   contract for a page whose only content is one canvas. There is no UI here:
-   no overlay, no controls, no readout, no watermark. The gold brand in the
-   shared navbar is the only non-blue thing on screen, and "blue only" governs
+/* jellyfish.css — Carino Jellyfish. Fleet tokens plus the layout contract for a one-canvas
+   page, and still no UI in this file: no overlay rule, no readout, no watermark and no
+   class but "ready" — the layout is all there is. Three framing keys, "1", "2" and "3",
+   change how the page is watched, and for the first 8.7 s of a session js/main.js appends
+   one line of grey text to #sea naming them, then removes it from the document; see SPEC
+   §9's second amendment. It is styled inline there rather than here, for the reason
+   showPoster() gives: a rule in a fifty-line stylesheet that exists for one transient is a
+   rule nobody will recognise later. The navbar gold is still the only non-blue thing on
+   screen — the hint is --text-sec on a --sea-veil shadow — and "blue only" still governs
    the canvas, not the chrome. */
 :root{
   --bg:#050505; --bg-elev:#0d0d0d; --bg-card:#0b0b0b;

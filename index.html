@@ -18,11 +18,22 @@
 <link rel="stylesheet" href="css/jellyfish.css" />
 </head>
 <body>
-  <!-- The entire document. There is no header.cs-header, no overlay, no control
-       and no readout, and that absence is structural rather than cosmetic: with
-       nothing for carino-navbar.js's relocateActions() to move, its right cluster
-       holds only .social-row, and `.social-row:not(:only-child)` correctly drops
-       the divider. An empty actions wrapper would draw that divider forever.
+  <!-- The entire document as authored. There is no header.cs-header, no overlay,
+       no control and no readout, and that absence is structural rather than
+       cosmetic: with nothing for carino-navbar.js's relocateActions() to move,
+       its right cluster holds only .social-row, and `.social-row:not(:only-child)`
+       correctly drops the divider. An empty actions wrapper would draw that
+       divider forever.
+
+       One thing arrives after parsing and then leaves again: js/main.js appends
+       exactly one transient <p> to #sea for the first 8.7 s of a session, naming
+       the three framing keys, and then removes it from the document (SPEC §9
+       amendment 2). It carries neither data-carino-actions nor data-carino-strip,
+       it is not a header.cs-header, and it is not a direct child of <body> — and
+       all three of those are what keep relocateActions() (carino-navbar.js:150-163)
+       from moving it into the navbar's right cluster, which would turn that same
+       divider on for ever and lift the element clean out of the water box. The
+       markup below is unchanged by it: still one element and one child.
 
        The navbar is injected as the first child of <body> in normal flow — 60px
        plus a 1px border, box-sizing:border-box, flex-shrink:0 — so the fleet
