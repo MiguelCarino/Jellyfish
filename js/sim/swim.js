@@ -116,6 +116,57 @@ export const SWIM_CONSTANTS = Object.freeze({
   /** Station keeping: extra tilt per metre of depth error, and its authority limit. */
   DEPTH_KEEP_GAIN: 9 * DEG_TO_RAD,
   DEPTH_KEEP_LIMIT: 22 * DEG_TO_RAD,
+  /*
+   * The depth analogue of the director's radial tank wall, and it exists
+   * because the two constants above are a station-keeping BIAS and were being
+   * read as a bound. They are not one, for two compounding reasons.
+   *
+   * DEPTH_KEEP_GAIN is 9°/m against an AXIS_TILT_SIGMA of 12°, so for the first
+   * metre of error the correction is smaller than the animal's own tilt noise
+   * and is simply lost in it. Worse, AXIS_TILT_MEAN is 78° — the bell already
+   * points twelve degrees ABOVE horizontal at rest — so the full ±22° of
+   * DEPTH_KEEP_LIMIT only reaches a tilt of 100°, and on a −1σ tilt excursion
+   * it reaches 88° and the animal is still climbing at full down-correction.
+   * The term cannot guarantee a descent at all, which is why the realised depth
+   * was a slow random walk with a soft centre rather than a band: measured over
+   * eight hours at the shipped seed, `position.y` spanned −2.40 … +2.19 m with
+   * σ = 0.71 m, four times the ±0.55 m DEPTH_TARGET_MAX the setpoint itself is
+   * clamped to. In station framing that walked the animal off the top of frame
+   * for 7074 consecutive frames — 117.9 s of empty water.
+   *
+   * The fix keeps the shipped term exactly as it is and adds a second one
+   * outside a soft band, the way the tank wall sits outside TANK_SOFT_RADIUS.
+   * DEPTH_SOFT_BAND is measured on the ERROR, not on absolute depth, so the
+   * whole ±0.55 m lighting schedule is free to move the setpoint wherever it
+   * likes and the wall never notices as long as the animal tracks it — which it
+   * does, at 45 % of its own authority. Inside 0.25 m of the setpoint the
+   * animal is on exactly the shipped bias and swims as freely as it always did.
+   * Outside it, DEPTH_WALL_GAIN acts on the EXCESS only, so the term is
+   * continuous and zero at the edge, and it reaches its full DEPTH_WALL_LIMIT
+   * by 0.65 m of error (0.25 + 60/150).
+   *
+   * DEPTH_WALL_LIMIT is 60° rather than another 22° precisely because of the
+   * arithmetic above: the correction has to beat the tilt it is added to, not
+   * merely exist. 54° (a 2σ low tilt) + 22° + 60° = 136°, i.e. 46° of genuine
+   * down-pitch in the worst noise the axis OU produces. It is a SEPARATE budget
+   * from DEPTH_KEEP_LIMIT, clamped separately below, so the shipped ±22° figure
+   * still describes the shipped term and every assertion written against
+   * `cruise · sin 22° = 0.0322 m/s` still describes what it was written about.
+   *
+   * Nothing about the animal's look changes, and that is measured rather than
+   * hoped for: the command goes through the τ = 4 s AXIS_TAU spring, so what
+   * reaches the bell is heavily smoothed. Over eight hours the realised
+   * bell-axis tilt histogram matches the shipped one to within half a percent
+   * in every ten-degree bin, and the extreme moves from 111.7° to 119.5°. What
+   * does change is the depth: `position.y` now spans −1.11 … +1.16 m, the
+   * animal is outside the station's frame cone on 0.09 % of frames instead of
+   * 4.42 %, and the longest continuous excursion falls from 117.9 s to 12.1 s —
+   * inside §7's eighteen-second bound with a third of it in hand, holding
+   * across every dt from 1/60 to the 1/30 clamp.
+   */
+  DEPTH_SOFT_BAND: 0.25,
+  DEPTH_WALL_GAIN: 150 * DEG_TO_RAD,
+  DEPTH_WALL_LIMIT: 60 * DEG_TO_RAD,
   /** §3.5 item 4: one side contracts this much harder, so the animal slowly yaws. */
   MUSCLE_ASYMMETRY: 0.08,
   MUSCLE_YAW_GAIN: 0.55,
@@ -233,6 +284,17 @@ export class Swim {
     this.worldOffset = new Vec3(0, 0, 0);
     this.rebasedThisStep = false;
 
+    /*
+     * Written by `sim/director.js` each step: a heading-rate bias in rad/s
+     * added to the yaw integration below, and the depth setpoint in metres
+     * that the station-keeping term steers toward. Both are zero on a page
+     * with no director, and zero here reproduces the shipped behaviour
+     * exactly — the yaw term vanishes and the setpoint is scene y = 0, which
+     * is the literal this module used to hold.
+     */
+    this.steerBias = 0;
+    this.depthTarget = 0;
+
     this._axisSpring = new Spring3(new Vec3(0, 1, 0));
     this._tilt = SWIM_CONSTANTS.AXIS_TILT_MEAN;
     this._heading = this.rng.range(0, TAU);
@@ -275,6 +337,11 @@ export class Swim {
     return this.position.add(this.worldOffset);
   }
 
+  /** The integrated swim heading, for a steering term that has to aim at it. */
+  get heading() {
+    return this._heading;
+  }
+
   /**
    * Rebuild from the seed. Called after a context restore so the animal comes
    * back identical rather than merely similar.
@@ -295,6 +362,14 @@ export class Swim {
     this.originShift.zero();
     this.worldOffset.zero();
     this.rebasedThisStep = false;
+    /*
+     * Mirrored here as well as in the constructor: a context restore rebuilds
+     * the animal from the seed but the director keeps running, and leaving a
+     * stale bias behind would have the restored animal steering on last
+     * frame's command. Zero is the no-director state, which is safe either way.
+     */
+    this.steerBias = 0;
+    this.depthTarget = 0;
     this._axisSpring.reset(new Vec3(0, 1, 0));
     this._tilt = SWIM_CONSTANTS.AXIS_TILT_MEAN;
     this._heading = this.rng.range(0, TAU);
@@ -503,8 +578,14 @@ export class Swim {
      * §3.5's asymmetric coronal muscle, expressed where it actually shows: the
      * turn happens during the power stroke, not continuously, so the animal
      * yaws in discrete nudges the way a real medusa corrects course.
+     *
+     * `steerBias` joins the same sum. The director already gates its own term
+     * on `contractionRate` before writing it here, so a commanded turn arrives
+     * as the same discrete power-stroke nudges the asymmetry does rather than
+     * as a continuous rudder, and it is then low-passed by the τ = 4 s axis
+     * spring below — nothing that enters this line can read as a snap.
      */
-    this._heading += (this._headingRate + this._asymmetry * K.MUSCLE_YAW_GAIN * this.contractionRate) * dt;
+    this._heading += (this._headingRate + this._asymmetry * K.MUSCLE_YAW_GAIN * this.contractionRate + this.steerBias) * dt;
     this.spin += this._spinRate * dt;
 
     /*
@@ -513,8 +594,37 @@ export class Swim {
      * back toward its band by leaning the bell axis rather than by any
      * artificial force. Positive `position.y` means it has risen, which asks
      * for more tilt (past horizontal, so thrust points down).
+     *
+     * The band itself is `depthTarget`, which a director may move: the
+     * SETPOINT moves, never the gain, so the 22° `DEPTH_KEEP_LIMIT` authority
+     * budget is not spent twice. That authority is finite and worth writing
+     * down — the fastest this term can climb or sink is
+     * `cruise · sin(DEPTH_KEEP_LIMIT) = 0.086 × 0.3746 = 0.0322 m/s`, so any
+     * schedule driving `depthTarget` must stay well under that or the animal
+     * simply lags its own setpoint and the excursion never materialises.
+     *
+     * Two terms with two budgets, and the split is the whole point. Inside
+     * DEPTH_SOFT_BAND the gentle DEPTH_KEEP_GAIN is the only thing acting,
+     * exactly as it always was, so the animal keeps wandering its band on its
+     * own terms. Outside it the steeper DEPTH_WALL_GAIN comes in on the EXCESS
+     * only — zero at the edge and rising from there, so the join is continuous
+     * and there is no discontinuity anywhere the animal normally swims. They
+     * are clamped SEPARATELY rather than summed and clamped once, so the
+     * shipped ±22° station-keeping budget stays the shipped ±22° and the wall
+     * gets the authority it needs on top of it. See the constant block above
+     * for why the bias alone could not bound anything: 9°/m is smaller than the
+     * animal's own 12° of tilt noise, and 22° of it is not even enough to point
+     * a bell that rests 12° above horizontal downward on a bad tilt draw.
      */
-    const depthError = clamp(this.position.y * K.DEPTH_KEEP_GAIN, -K.DEPTH_KEEP_LIMIT, K.DEPTH_KEEP_LIMIT);
+    const depthErrorMetres = this.position.y - this.depthTarget;
+    const depthExcess = Math.max(0, Math.abs(depthErrorMetres) - K.DEPTH_SOFT_BAND);
+    const depthError =
+      clamp(depthErrorMetres * K.DEPTH_KEEP_GAIN, -K.DEPTH_KEEP_LIMIT, K.DEPTH_KEEP_LIMIT) +
+      clamp(
+        Math.sign(depthErrorMetres) * depthExcess * K.DEPTH_WALL_GAIN,
+        -K.DEPTH_WALL_LIMIT,
+        K.DEPTH_WALL_LIMIT
+      );
     const tilt = clamp(this._tilt + depthError, 0.05, Math.PI - 0.05);
 
     const st = Math.sin(tilt), ct = Math.cos(tilt);

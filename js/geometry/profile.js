@@ -27,8 +27,8 @@
 
    2. THE PROFILE CURVE IS THE EXUMBRELLA — the outer surface. The
       subumbrella is generated at `P − N·w(φ)`, exactly as §3.1
-      says, so `w(φ)` is the LOCAL WALL THICKNESS: 8.3 mm at the
-      apex, 6.4 mm at mid-bell, 0.78 mm at the margin. §3.1 also
+      says, so `w(φ)` is the LOCAL WALL THICKNESS: 16.38 mm at the
+      apex, 12.48 mm at mid-bell, 0.78 mm at the margin. §3.1 also
       calls it a "half-thickness", which reads as though the wall
       were 2w; it is not, and the arithmetic elsewhere confirms
       this reading. §2.5's analytic fallback is
@@ -36,8 +36,12 @@
       TWO CROSSINGS a ray makes through a closed shell — in the
       top and out the bottom — not one crossing of a doubled wall.
       Under this reading R = 0.13 m and H = 0.34 R are exactly the
-      stated numbers and the judge panel's "6 mm wall" lands on
-      w at mid-bell. Set `uWall` from `wallThickness(φ)`.
+      stated numbers. The judge panel's "6 mm wall" used to land on
+      w at mid-bell and no longer does: solving
+      0.120·(1 − φ²) + 0.006 = 6/130 gives φ = 0.82, out on the
+      shoulder, because WALL_A was raised from 0.058 to 0.120 for
+      the reason its own comment below gives. Set `uWall` from
+      `wallThickness(φ)`.
 
    3. THE OUTWARD NORMAL of the (r, y) profile is
       `normalize(−dy/dφ, dr/dφ)`, which points +Y at the apex and
@@ -310,7 +314,8 @@ export function profileFrame(phi) {
 /* --- Wall thickness ----------------------------------------------------- */
 
 /**
- * w(φ)/R = 0.058·(1 − φ²) + 0.006, from §3.1. Thick dome, wafer-thin margin —
+ * w(φ)/R = 0.120·(1 − φ²) + 0.006, from §3.1 with WALL_A raised for the reason
+ * that constant's own comment gives. Thick dome, wafer-thin margin —
  * and it is the margin's thinness combined with the grazing view angle at the
  * silhouette that makes τ explode there and light the rim. The rim is not a
  * Fresnel term; it is this function meeting `1/|N·V|`.
@@ -320,7 +325,7 @@ export function wOverR(phi) {
   return WALL_A * (1 - p * p) + WALL_B;
 }
 
-/** Local wall thickness in metres. 8.3 mm at the apex, 0.78 mm at the margin. */
+/** Local wall thickness in metres. 16.38 mm at the apex, 0.78 mm at the margin. */
 export function wallThickness(phi, R = BELL_RADIUS) {
   return R * wOverR(phi);
 }
@@ -331,6 +336,37 @@ export function wallThickness(phi, R = BELL_RADIUS) {
  * and gets the right number rather than a factor of two.
  */
 export const wallHalfThickness = wallThickness;
+
+/**
+ * The wall's wedge slope, dimensionless: ε(φ) = BELL_WEDGE_SLOPE·φ is the angle
+ * between the exumbrella and subumbrella faces at φ, in radians.
+ *
+ * The subumbrella is the exumbrella offset by −N·w(φ) (convention 2), so
+ * wherever w varies along the profile the two faces are not parallel and the
+ * wall is a thin PRISM rather than a slab. The apex end of that prism is the
+ * thick end — 16.38 mm against 0.78 mm at the margin — and the angle between
+ * the faces is the rate at which the wall thins per unit of distance travelled
+ * along the surface, ε = |dw/dφ| / |dp/dφ|. Both halves are closed form here.
+ * From w(φ)/R = WALL_A·(1 − φ²) + WALL_B, |dw/dφ| = 2·WALL_A·φ·R; and because
+ * φ is NORMALISED ARC LENGTH (convention 1, not the knot parameter) |dp/dφ| is
+ * the exact constant PROFILE_ARC_LENGTH·R. The R cancels and nothing has to be
+ * sampled or differenced:
+ *
+ *     ε(φ) = 2·WALL_A·φ / PROFILE_ARC_LENGTH = 0.2171244·φ  radians
+ *
+ * which is 2.49° at φ = 0.2, 6.22° at 0.5, 8.71° at 0.7 and 11.82° at 0.95.
+ * Derived, not tuned: it follows from WALL_A and the profile knots and cannot
+ * be moved independently of them. A prism deviates a transmitted ray toward its
+ * thick side, i.e. toward the apex here, which is what makes the bell the weak
+ * positive meniscus it physically is.
+ *
+ * Declared in this section rather than beside WALL_A because it needs
+ * PROFILE_ARC_LENGTH, whose IIFE runs above. Consumed by shaders/bell.js, which
+ * interpolates the number into BELL_VS as a literal; nothing flows the other
+ * way, so this file still imports nothing at all and that new edge cannot
+ * become a cycle.
+ */
+export const BELL_WEDGE_SLOPE = 2 * WALL_A / PROFILE_ARC_LENGTH;   // 0.2171244
 
 /* --- The revolved surface ----------------------------------------------- */
 

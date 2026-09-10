@@ -23,7 +23,7 @@
 
    THERE IS NO FRESNEL RIM AND NO ANISOTROPIC SPECULAR HERE, and
    that is the single most important shading decision in the
-   project. Mesoglea is n = 1.35 against seawater at n = 1.339, so
+   project. Mesoglea is n = 1.35 against seawater at n = 1.333, so
    F0 is 4e-5: underwater, index contrast is essentially gone, and
    that is precisely why a jellyfish is nearly invisible in water.
    The luminous margin in every real photograph is not reflection.
@@ -54,6 +54,15 @@
    subumbrella, with no per-shell sign flip and — the part that
    matters — no sign discontinuity on the rim band for a seam to
    glow through. Do not multiply the normal by the shell tag.
+
+   The wedge term added for §2.5's exit face does read both the tag
+   and the row direction, and that is not the same thing. It needs
+   a TANGENT rather than a normal — the direction of increasing phi,
+   which genuinely does reverse when the sheet turns back at the rim
+   — and it needs to switch itself off across the rim band, where
+   the two faces of the wall meet as one rounded lip and there is no
+   wedge to speak of. Both are read from aNextS.w and aParam2.z, and
+   neither touches vNormal.
    ============================================================ */
 
 import { CAUSTIC_GLSL } from './cookie.js';
@@ -64,6 +73,12 @@ import {
   THICK_TAU_CLAMP,
   THICK_GEO_CLAMP
 } from './thickness.js';
+// The one number this file takes from the geometry. It is the wall's wedge
+// slope, derived there from WALL_A and the profile's arc length, and it is
+// interpolated into BELL_VS as a literal rather than being sent as a uniform,
+// because it is a property of the mesh and cannot change while the page runs.
+// geometry/profile.js imports nothing at all, so this edge cannot be a cycle.
+import { BELL_WEDGE_SLOPE } from '../geometry/profile.js';
 
 /* --- Where deform() lives ------------------------------------------------ */
 
@@ -117,7 +132,7 @@ uniform float uPhase;       // accumulated swim CYCLES, from sim/swim.js
 uniform float uAmp;
 uniform float uTwistTime;
 uniform float uBellRadius;
-uniform float uWall;        // w(0) = 8.32 mm; aParam2.w scales it per vertex
+uniform float uWall;        // w(0) = 16.38 mm; aParam2.w scales it per vertex
 
 out vec3  vWorldPos;
 out vec3  vNormal;
@@ -128,6 +143,8 @@ out float vViewDist;
 out float vWorldY;     // TRUE sea depth, negative below the surface
 out float vBaked;      // constant density for the interior organs, 0 for bell
 out float vFringe;     // section 3.1's rim-band fringe modulation
+out float vWedge;      // section 2.5's wedge angle eps(phi), radians; 0 off the shells
+out vec3  vTanPhi;     // world-space unit tangent toward INCREASING phi
 
 void main(){
   float phi = aUV.x;
@@ -146,6 +163,55 @@ void main(){
   nLocal = nl > 1e-12 ? nLocal / nl : vec3(0.0, 1.0, 0.0);
 
   vec4 world = uModel * vec4(p0, 1.0);
+
+  // ---- section 2.5: the exit face is NOT parallel to the entry face ------
+  // The two shells are the same profile offset by -N*w(phi), and w runs
+  // 16.38 mm at the apex to 0.78 mm at the margin, so each wall crossing is a
+  // thin PRISM whose apex points at the margin. A prism of apex eps in
+  // relative index eta deviates a ray by (eta-1)*eps TOWARD ITS THICK SIDE,
+  // i.e. toward the bell's apex, i.e. along -vTanPhi. That deviation is
+  // ANGULAR: unlike the slab's lateral offset it does not cancel at the exit
+  // face and it is not bounded by the wall. It is what makes the bell the weak
+  // positive meniscus it physically is. eta-1 = 0.0128 is the same 1.35/1.333
+  // that makes F0 = 4e-5; nothing here claims a larger index contrast.
+  //
+  // eps(phi) = BELL_WEDGE_SLOPE*phi is closed form, not a fit: phi is
+  // normalised arc length, so |dp/dphi| is exactly PROFILE_ARC_LENGTH*R, the R
+  // cancels against |dw/dphi| = 2*WALL_A*phi*R, and geometry/profile.js hands
+  // the ratio over as one literal. 2.49 deg at phi 0.2, 6.22 at 0.5, 11.82 at
+  // 0.95.
+  //
+  // Rows run apex -> margin, across the rim, then margin -> apex, so aNextS.w
+  // is negative on the subumbrella, which is the only thing the sign is used
+  // for; the MAGNITUDE never divides by it, because phi is normalised arc
+  // length and eps is closed form.
+  float sgnPhi   = aNextS.w >= 0.0 ? 1.0 : -1.0;
+  vec3  tW       = mat3(uModel) * ((pS - p0) * sgnPhi);
+  float tl       = length(tW);
+  vTanPhi        = tl > 1e-12 ? tW / tl : vec3(0.0);
+  // 1 on both shells; 0 on the gonad tubes (tag 2) and the manubrium (tag 3),
+  // which are not a shell with a varying wall.
+  float shellSel = aParam2.z > 1.5 ? 0.0 : min(abs(aParam2.z), 1.0);
+  // ...and 0 wherever the row neighbour is not a step along the meridian at
+  // all, which is exactly where aNextS.w is zero. That is the whole rim band,
+  // whose two faces are one rounded lip at phi = 1 and where the wedge has no
+  // meaning -- and it is ALSO the outermost exumbrella row, which the shell tag
+  // cannot catch because it reads 1, not 0. buildRowTable walks rows 0..rings
+  // at phi = j/rings and tags every one of them EXUMBRELLA, then lays the rim
+  // rows down at phi = 1 as well, so row rings sees a neighbour at its own
+  // phi: dPhi is 1 - 1 = 0 exactly, and the offset gridNeighbours stores is
+  // sheetPoint's -b*N*w + T*RIM_BULGE*w*sin(pi*b), which dives across the wall
+  // rather than running along the meridian -- 35 deg off the true
+  // increasing-phi tangent, on the one ring where vWedge would otherwise be
+  // maximal. So the offset itself is what is tested rather than the tag. The
+  // epsilon is nominal rather than load-bearing: aNextS.w is bit-exactly
+  // 1.0 - 1.0 there, and the smallest legitimate magnitude on any other shell
+  // row is 1/rings = 0.0208, ten orders of magnitude clear either way. Only
+  // vWedge is masked -- vTanPhi and nLocal keep the values they had, so not one
+  // normal moves; the rim band's existing vWedge = 0 simply reaches one row
+  // further in, to a row already sitting at phi = 1.
+  shellSel *= step(1e-12, abs(aNextS.w));
+  vWedge         = ${BELL_WEDGE_SLOPE.toFixed(7)} * phi * shellSel;
 
   float band = 1.0 - abs(aParam2.z);
   vFringe    = bellFringe(phi, aUV.y, band);
@@ -205,6 +271,12 @@ in float vViewDist;
 in float vWorldY;
 in float vBaked;
 in float vFringe;
+// Declared UNCONDITIONALLY, even though only the exumbrella variant refracts:
+// an unused input is legal, whereas an input that exists in one variant and not
+// the other splits the interface BELL_VS publishes in two. Both have a matching
+// vertex out in every configuration, which is the property the link depends on.
+in float vWedge;       // section 2.5's wedge angle eps(phi), radians
+in vec3  vTanPhi;      // world-space unit tangent toward increasing phi
 
 uniform vec3  uCameraPos;
 uniform vec2  uInvRes;        // 1.0 / the size of the target being drawn into
@@ -296,11 +368,18 @@ void main(){
 
   // ---- optical depth through the tissue --------------------------------
   float rho = jellyDensity(vPhi, vTheta, vBaked, vFringe);
+
+  // |N.V|, with the 0.15 floor that keeps the grazing silhouette finite. It is
+  // declared HERE rather than inside the branch below because both paths need
+  // it now: the analytic slab divides by it, and the crossing count after the
+  // #endif multiplies by it to turn a measured path back into a count of walls.
+  // The expression is character for character the one the analytic branch used
+  // to declare, so that branch is bit-identical to what shipped.
+  float ndv = max(abs(dot(N, V)), 0.15);
 #ifdef ANALYTIC_THICKNESS
   // The RGBA8 fallback of section 2.5. Exact for a locally planar shell: a ray
   // at |N.V| through a wall of thickness w crosses 2w of tissue, in the top and
-  // out the bottom. The 0.15 floor is what keeps the grazing silhouette finite.
-  float ndv  = max(abs(dot(N, V)), 0.15);
+  // out the bottom.
   float tau  = 2.0 * vWall * rho / ndv;
   float dGeo = 2.0 * vWall / ndv;
 #else
@@ -339,6 +418,18 @@ void main(){
   // hard clamp: an unsealed rim must not blow out
   float tau  = min(dGeo * rho, ${THICK_TAU_CLAMP.toFixed(2)});
 #endif
+
+  // How many wall crossings this ray actually made. A view ray through a
+  // closed shell crosses twice -- in the top and out the bottom -- which is the
+  // same factor of two the analytic branch above carries and which
+  // geometry/profile.js's convention 2 states in writing; a ray that leaves
+  // through the bell mouth crosses once. Both crossings deviate toward the apex
+  // and therefore ADD in screen terms. dGeo MEASURES which happened, so this is
+  // not an assumption. On the analytic path dGeo = 2*vWall/ndv, so the quotient
+  // is 2 up to the rounding of one divide and the clamp's ceiling absorbs the
+  // rest: the two paths cannot diverge. The 1e-4 is the divide-by-zero guard on
+  // a wall that a degenerate vertex could report as zero.
+  float crossings = clamp(dGeo * ndv / max(vWall, 1e-4), 1.0, 2.0);
 
   // ---- Beer-Lambert with similarity theory ------------------------------
   vec3 sigS = gelSigmaS();               // reduced scattering
@@ -387,8 +478,20 @@ void main(){
 
   vec3 ms = alb * (1.0 - Tr) * lobe * sunCol * shadowG / PI;
 
-  // (2) SINGLE SCATTERING: forward-peaked. g is 0.72, and the peak is CAPPED --
-  //     this is the term that produced the periodic flare the calm judge flagged.
+  // (2) SINGLE SCATTERING: forward-peaked, g = 0.72. This is the term that
+  //     produced the periodic flare the calm judge flagged, and the min() below
+  //     is what was put in front of it -- but at the shipped g that cap is
+  //     UNREACHABLE, and saying so is worth more than leaving the line looking
+  //     like it is holding something back. hg(1, 0.72) = 1.7458: the head-on
+  //     theoretical peak is already below 2.4 at every possible geometry. The
+  //     cap was sized against the old g = 0.86, where hg(1, 0.86) = 7.5517 and
+  //     it really did bind. What the camera can actually reach is smaller
+  //     again -- the 25 deg elevation limit holds dot(-L, V) at or under
+  //     0.5081, i.e. hg = 0.0549, which is 3.1 % of the peak and 2.3 % of the
+  //     cap -- so the forward-scatter flare §4.5 forbids is geometrically
+  //     unreachable from this rig rather than merely bounded. The min() stays
+  //     as the tripwire for a future g, which is the only thing that could
+  //     bring it back.
   float phase = min(hg(dot(-L, V), G_GEL), 2.4);
   vec3  ss    = sunCol * phase * Tr * (1.0 - exp(-sigS * tau)) * shadowG;
 
@@ -437,14 +540,38 @@ void main(){
   vec3  outC  = waterApply(col, vViewDist, vWorldY) * OUT_GAIN;
   fragColor   = vec4(outC / max(alpha, 1e-4), alpha);
 #else
-  // Refraction with a REAL march distance: the measured geometric path, so the
-  // distortion grows where the bell is thick and vanishes at the margin. A
-  // uv += N.xy*k hack cannot produce that structure.
-  vec3 rd   = refract(-V, N, 1.0/1.0128);
-  vec4 clip = uViewProj * vec4(vWorldPos + rd * dGeo, 1.0);
-  vec2 uvR  = ((clip.xy / clip.w) / uSeaOverscan) * 0.5 + 0.5;
+  // Refraction through a wall that is a PRISM, not a slab. Two terms, and both
+  // are marches with a REAL distance rather than a uv += N.xy*k hack, which
+  // cannot produce either structure. eta is the physics and not a knob: 1.35
+  // for mesoglea against 1.333 for seawater is the same near-nothing contrast
+  // that makes F0 = 4e-5 and is precisely why a jellyfish is nearly invisible.
+  const float ETA = 1.0128;
 
-  // Cauchy dispersion, +-1.5% on eta -> an indigo/cyan fringe at the rim.
+  // (a) The parallel-slab term, exactly as it shipped: refract at the entry
+  //     face and carry the MEASURED geometric path, so the distortion grows
+  //     where the bell is thick and vanishes at the margin.
+  vec3 rd     = refract(-V, N, 1.0/ETA);
+  vec4 clipS  = uViewProj * vec4(vWorldPos + rd * dGeo, 1.0);
+  vec2 uvSlab = ((clipS.xy / clipS.w) / uSeaOverscan) * 0.5 + 0.5;
+
+  // (b) The exit face. See BELL_VS. Marching from uCameraPos and differencing
+  //     two taps built the SAME way is what makes this provably additive: at
+  //     vWedge = 0, bent IS toFrag bit for bit, clipW IS clip0, and uvR IS
+  //     uvSlab exactly. The shipped image is the eps = 0 case of this one.
+  vec3  toFrag   = vWorldPos - uCameraPos;
+  float fragDist = length(toFrag);
+  vec3  bent     = toFrag - vTanPhi * (fragDist * crossings * (ETA - 1.0) * vWedge);
+  vec4  clip0    = uViewProj * vec4(uCameraPos + toFrag, 1.0);
+  vec4  clipW    = uViewProj * vec4(uCameraPos + bent,   1.0);
+  vec2  uv0      = ((clip0.xy / clip0.w) / uSeaOverscan) * 0.5 + 0.5;
+  vec2  uvW      = ((clipW.xy / clipW.w) / uSeaOverscan) * 0.5 + 0.5;
+
+  vec2 uvR = uvSlab + (uvW - uv0);
+
+  // Cauchy dispersion, +-1.5% on the displacement -> an indigo/cyan fringe at
+  // the rim. UNCHANGED: mesoglea and seawater are both water-like and a
+  // contrast of 0.017 in index barely disperses, and the composite already runs
+  // a lateral CA of +0.0011 / -0.0009 on top of it.
   vec3 bg;
   bg.r = seaTap(mix(uvS, uvR, 0.985)).r;
   bg.g = seaTap(uvR).g;
@@ -452,8 +579,14 @@ void main(){
 
   // Guard: a tap that leaves the frame falls back to the straight one. SEA is
   // rendered with 8 % overscan precisely so this fires rarely, but the loose
-  // look-at camera does put the animal near the frame edge.
-  float ok = step(0.0, min(uvR.x, uvR.y)) * step(max(uvR.x, uvR.y), 1.0);
+  // look-at camera does put the animal near the frame edge. The three w tests
+  // are the perspective check the shipped code did not have -- it was safe at a
+  // 3.10 m standoff, and close framing brings the margin to within about
+  // 0.95 m of the eye. A tap that lands behind the eye divides by a negative w
+  // and comes back as a mirrored uv, which can pass the range test below while
+  // reading the wrong half of the frame.
+  float ok = step(1e-4, clipS.w) * step(1e-4, clipW.w) * step(1e-4, clip0.w)
+           * step(0.0, min(uvR.x, uvR.y)) * step(max(uvR.x, uvR.y), 1.0);
   bg = mix(seaTap(uvS), bg, ok);
 
   // SEA is a render from THIS eye, so the tap already carries the water between

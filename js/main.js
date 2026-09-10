@@ -12,13 +12,21 @@
    THE ORDER OF A FRAME IS NOT NEGOTIABLE, and it is the one
    thing in this file worth reading twice:
 
+     director.step(dt, swim)           the tank, the station, the schedule
      swim.step(dt)                     the pulse, the thrust, the pose
      rebase                            floating origin: shift EVERYTHING
      flow.step(dt, swim)               the jet and the shed rings
      strands.updateRoots(pose)         the margin the tentacles hang from
      guides.step / arms.step(dt, flow) the verlet substeps
+     director.compose(swim, mode)      the station, in scene space, this frame
      camera.step(dt, swim.position, swim.velocity)  the loose look-at
      snow.step(dt, camera.position)    advected by the same flow
+
+   The director FIRST because the two commands it writes onto the
+   animal — a heading-rate bias and a depth setpoint — are read
+   inside `swim.step()` on the very next line, and `compose()`
+   AFTER the rebase because it converts world coordinates to scene
+   coordinates using the `worldOffset` this frame ended with.
 
    `updateRoots` BEFORE the substeps because the margin moves
    about three centimetres on a stroke and a root that lags by one
@@ -56,11 +64,13 @@ import {
   addContextLossHandlers,
   createGpuTimer
 } from './gl.js';
+import { RAD_TO_DEG, smoothstep } from './math.js';
 import { createFrameGraph } from './render/frame.js';
 import { COOKIE_TIME_SCALE_REDUCED } from './shaders/cookie.js';
 import { createQualityController } from './render/quality.js';
 import { Camera } from './camera.js';
 import { Swim, SCENE_DEPTH_ORIGIN } from './sim/swim.js';
+import { Director } from './sim/director.js';
 import { FlowField } from './sim/flow.js';
 import { ChainSystem, RetardedChainSystem, VERLET_CONSTANTS } from './sim/verlet.js';
 import { SnowField } from './sim/snow.js';
@@ -109,6 +119,80 @@ const REDUCED_CAUSTIC_RATE = COOKIE_TIME_SCALE_REDUCED;
 
 /** The one class hook css/jellyfish.css defines. It fades the canvas up over 1.2 s. */
 const READY_CLASS = 'ready';
+
+/* --- §9's one piece of visible chrome, and it is visible for 8.7 s ------- */
+
+/*
+ * See SPEC §9 amendment 2. Three affordances that nobody can find are not
+ * restraint, they are a defect, and this is the smallest thing that repairs it:
+ * thirty characters, about 0.23 % of a 1920x1080 frame, once per page load,
+ * removed from the document at 8.7 s and never shown again — not on a context
+ * restore, not on a timer, not on a second look. It is styled inline rather than
+ * from css/jellyfish.css for exactly the reason showPoster() gives below: a rule
+ * in a fifty-line stylesheet that exists for one transient is a rule nobody will
+ * recognise later, and SPEC's "~55 lines; there is no UI to style" stays true of
+ * that file. Its clock is the render loop's own `dt` — never setTimeout, never
+ * el.animate(), never a CSS transition — so a hidden tab pauses it instead of
+ * running it out into an empty room.
+ */
+
+/**
+ * Three words that name what each framing IS rather than what the key does.
+ * "alongside" is js/camera.js's own word for the subject rig. Thirty characters:
+ * ASCII plus two U+00B7 separators, so the whole string sits inside IBM Plex
+ * Sans's LATIN subset — no latin-ext and no cyrillic face is fetched for it, and
+ * there is no font-display:swap reflow half a second in. English only, because
+ * this repo ships no i18n.js and carino-navbar.js's `window.t` is therefore
+ * always undefined here — a real inconsistency with the rest of the fleet,
+ * accepted on the grounds that it is three words long and lives for nine
+ * seconds.
+ */
+const HINT_TEXT = '1 tank · 2 alongside · 3 close';
+
+/*
+ * No box, no border, no ground, no gold and no click target: a box reads as
+ * chrome against a frame dithered to ±1 LSB. `--text-sec` is the register both
+ * of the other non-canvas elements on this page already use, and it is
+ * deliberately NOT `--accent` — css/jellyfish.css's header says the navbar gold
+ * is the only non-blue thing on screen, and tests/shot.mjs measures
+ * redToBlueRatio over every pixel below y = 61. `--sea-veil` gets its first
+ * consumer in the repo as the shadow colour, which is the same colour the
+ * vignette mixes toward. Bottom-centre 26 px up is the darkest, calmest region
+ * of the frame, clear of #sea::before's 28 px navbar seam and, being centred,
+ * clear of the ?dev=1 panel's bottom-left corner. z-index 2 is above that seam
+ * strip (1) and below the dev panel (3); it shares 2 with the poster frame and
+ * can never coexist with it, because this element is created inside frame() and
+ * both poster paths return before any frame runs.
+ */
+const HINT_STYLE = [
+  'position:absolute', 'left:0', 'right:0', 'bottom:26px', 'z-index:2',
+  'margin:0', 'padding:0 1rem', 'pointer-events:none',
+  'text-align:center', 'white-space:nowrap',
+  'font:12px/1.6 var(--sans,system-ui,-apple-system,"Segoe UI",sans-serif)',
+  'letter-spacing:0.10em',
+  'color:var(--text-sec,#a3a3a3)',
+  'text-shadow:0 1px 4px var(--sea-veil,#04070E)',
+  'opacity:0'
+].join(';');
+
+/** Exactly the canvas fade in css/jellyfish.css, so the hint arrives as part of
+    the descent rather than as a notification arriving on top of it. */
+const HINT_RISE = 1.2;
+/** Long enough to read thirty characters twice, short enough not to become
+    furniture. */
+const HINT_HOLD = 5.0;
+/** Twice the house rate: it leaves, it is not dismissed. 1.2 + 5.0 + 2.5 = 8.7 s
+    of total life from the first PRESENTED frame, which is 3.3 s clear of
+    tests/shot.mjs's default 12000 ms capture — so the project's photometric
+    evidence is never taken with it in frame. */
+const HINT_FALL = 2.5;
+/** On #a3a3a3 over near-black: legible, and far below the 0.55 bright-pass knee
+    foot in linear terms, so it cannot bloom and cannot move the auto-exposure
+    highlight meter. §10's rate budget binds only on regions larger than 5 % of
+    the frame and this one is twenty-three times under that, so the ramps above
+    are aesthetics rather than compliance; appearing once per page load, §10's
+    FFT sees an impulse and not a carrier. */
+const HINT_PEAK = 0.60;
 
 /* --- The poster frame --------------------------------------------------- */
 
@@ -165,7 +249,16 @@ export function createJellyfish(options = {}) {
     canvas = document.getElementById('gl'),
     seed = 'aurelia',
     forcedTier = null,
-    dev = false
+    dev = false,
+    mode: initialMode = 'tank',
+    /*
+     * Whether to show the transient controls hint at all. It defaults OFF at
+     * this boundary rather than on: the auto-start block below decides for the
+     * page (fine pointer, no explicit `?mode=`, no `?hint=0`), and an embedder
+     * — or the suite, which boots this function directly dozens of times — gets
+     * a page with nothing added to it unless it asks.
+     */
+    hint: showHint = false
   } = options;
 
   if (!host || !canvas) return { destroy() {} };
@@ -211,6 +304,21 @@ export function createJellyfish(options = {}) {
    */
   const imperfection = createBakedImperfection();
 
+  /*
+   * Which of the three framings the page is watching from: 'tank' is a fixed
+   * world-anchored station, 'free' is the shipped subject rig alongside the
+   * animal, and 'close' is a subject-anchored orbit 1.35 m out, below the animal
+   * and on the far side of it from the sun. It lives in this
+   * closure and NEVER at module scope, because `export const jellyfish =
+   * createJellyfish(...)` at the foot of this file re-executes on every one of
+   * the suite's cache-busted re-imports; a module-level `let` would leak the
+   * previous boot's framing into the next one and make a failure depend on the
+   * order the sections happened to run in. `camera.mode` is the authoritative
+   * mirror of this value, and the keyboard handler writes both through
+   * `setMode()` below so the two can never disagree.
+   */
+  let mode = (initialMode === 'free' || initialMode === 'close') ? initialMode : 'tank';
+
   const swim = new Swim({ seed: `${seed}-swim` });
   const flow = new FlowField();
   const camera = new Camera({
@@ -219,6 +327,36 @@ export function createJellyfish(options = {}) {
     depthOrigin: SCENE_DEPTH_ORIGIN,
     strictElevation: dev
   });
+
+  /*
+   * The director is pure CPU — a bounded swim volume, a world-fixed camera
+   * station and six schedules longer than three hundred seconds — so like the
+   * animal it survives a context loss untouched and is built here rather than
+   * in buildGpu(). It comes after the camera because `enterTank()` reads where
+   * the camera already is.
+   *
+   * The seven statements that follow are the boot pose, and their order is the
+   * reason the SnowField is no longer constructed next to the camera. A zero
+   * step primes the director's clocks and the schedule without consuming an rng
+   * draw; `compose()` turns the station's world coordinates into scene space;
+   * `setMode(..., true)` snaps the framing weights and the FOV to the terminal
+   * value for this mode and clears the camera's `_primed` flag; and the zero
+   * camera step
+   * then places the eye exactly on the framing rather than letting it swoop in.
+   * Only THEN is the snow scattered, because its three strata are bands built
+   * around wherever the camera is at that instant — build them first and a
+   * three-metre boot dolly empties the near stratum on frame one, behind the
+   * 1.2 s fade where nobody can see it happen but everybody sees the result.
+   */
+  const director = new Director({ seed: `${seed}-director` });
+  director.enterTank(camera.position, swim);
+  director.step(0, swim);
+  director.compose(swim, mode);
+  camera.sunTime = director.lightTime;
+  camera.setStation(director.stationScene, director.aimTarget, director.aimVelocity);
+  camera.setMode(mode, swim.position, true);
+  camera.step(0, swim.position, swim.velocity);
+
   const snow = new SnowField({ seed: `${seed}-snow`, cameraPosition: camera.position });
 
   /* Built with the GPU below, because they need the strand descriptors. */
@@ -245,6 +383,23 @@ export function createJellyfish(options = {}) {
   let frameIndex = 0;
   let pendingDt = 0;
   let faded = false;
+  /*
+   * The hint's whole lifecycle, in three boot-scope variables and no timer.
+   * `hintAge` is integrated from `stepDt`, the render loop's own accumulated
+   * real time since the previous PRESENTED frame — the same quantity simulate()
+   * is driven by, and not the per-rAF `dt`, because §7's 30 Hz floor drops every
+   * other rAF and a hint clocked on `dt` would live 17.4 s instead of 8.7 s on
+   * exactly the weak machines that floor exists for. `pendingDt` only
+   * accumulates while frame() runs, so a hidden tab still freezes it. The
+   * distinction that matters is between `faded` and `hintShown`: a context
+   * restore clears `faded` and replays the 1.2 s water fade every time the
+   * machine wakes up, and `hintShown` deliberately survives that, so an
+   * eight-hour session on a Mac that resets its GPU on every sleep still shows
+   * this line exactly once.
+   */
+  let hintEl = null;
+  let hintAge = 0;
+  let hintShown = false;
   let contextLost = false;
   let destroyed = false;
   let reportedMissing = false;
@@ -275,6 +430,19 @@ export function createJellyfish(options = {}) {
     settings: null,
     dt: 0, time: 0, causticTime: 0, frame: 0,
     phase: 0, amplitude: DEFORM.AMPLITUDE, twistTime: 0,
+    /*
+     * Exactly −14.0, for the life of the page, and it must stay that way. It is
+     * the most tempting lever in this file — render/frame.js pushes it into
+     * `uWorldOrigin.y`, which regrades the water column, the veil, the caustic
+     * mip blur and the shaft source all at once — and it is wrong twice over.
+     * `uSunCol` is derived from `swim.worldY` (js/sim/swim.js:280), which reads
+     * the module constant SCENE_DEPTH_ORIGIN and would NOT follow, so moving
+     * this would silently desync the animal's key light from the water it is
+     * sitting in. And a world origin that moves is a global mean-luminance
+     * CARRIER, which is exactly the FFT peak §10 forbids by name. sim/director.js
+     * varies the light by moving the ANIMAL through the column instead, on
+     * carriers no shorter than 511 s.
+     */
     depthOrigin: SCENE_DEPTH_ORIGIN,
     outputWidth: 1, outputHeight: 1
   };
@@ -413,9 +581,27 @@ export function createJellyfish(options = {}) {
 
   function simulate(dt) {
     simTime += dt;
+
+    /*
+     * The director before the animal, because the two commands it writes onto
+     * `swim` — a heading-rate bias in rad/s and a depth setpoint in metres — are
+     * consumed by `swim.step()` immediately below. It reads LAST frame's
+     * contraction rate and world position: sixteen milliseconds of staleness
+     * against a 1.3 s beat and a τ = 4 s axis spring, which is two orders below
+     * anything either of them can express. Do NOT "fix" that into a two-pass
+     * ordering; the frame order at the top of this file is load-bearing.
+     */
+    director.step(dt, swim);
+
     // The two clocks §4.6 slows. They are held rather than scaled, so toggling
-    // reduce-motion pauses them where they are instead of jumping them.
-    causticTime += dt * (reducedMotion ? REDUCED_CAUSTIC_RATE : 1);
+    // reduce-motion pauses them where they are instead of jumping them. The
+    // caustic clock carries a third factor as well, the director's [0.72, 1.00]
+    // rate: because `causticTime` feeds both `uCookieTime` and cookieDrift(),
+    // one multiplier calms the surface's internal animation and its bulk
+    // advection together, over a 640 s carrier that never runs faster than
+    // shipped — so shaders/cookie.js's measured rate budget is respected by
+    // construction rather than by care.
+    causticTime += dt * (reducedMotion ? REDUCED_CAUSTIC_RATE : 1) * director.causticRate;
     twistTime += reducedMotion ? 0 : dt;
 
     swim.step(dt);
@@ -427,6 +613,12 @@ export function createJellyfish(options = {}) {
      * camera, the tentacles, the vortex rings and the marine snow all jump a
      * millimetre in the opposite direction on the same frame. This is the only
      * place that list exists, so anything added to the sim belongs in it.
+     *
+     * With one deliberate exception: the DIRECTOR is not in the list and must
+     * not be added to it. It holds the camera station in WORLD coordinates and
+     * converts to scene space inside `compose()`, using the `worldOffset` of
+     * the frame it is called on — so it is rebase-exact by construction, and
+     * translating it here as well would apply the same shift twice.
      */
     if (swim.rebasedThisStep) {
       const d = swim.originShift;
@@ -467,6 +659,18 @@ export function createJellyfish(options = {}) {
       strands.packArms(arms.positions, simTime);
     }
 
+    /*
+     * The station, recomputed in scene space against the worldOffset this frame
+     * ended with, and the sun's own clock — both handed over before the camera
+     * springs toward them. `camera.step()` blends the station against the
+     * two subject-anchored rigs by its own eased weight simplex, so these three
+     * lines run in all three framings and in every transition between them; a
+     * page whose camera is on either subject rig simply ignores what it is
+     * given, because its station weight is zero.
+     */
+    director.compose(swim, mode);
+    camera.sunTime = director.lightTime;
+    camera.setStation(director.stationScene, director.aimTarget, director.aimVelocity);
     camera.step(dt, swim.position, swim.velocity);
     snow.step(reducedMotion ? dt * REDUCED_SNOW_RATE : dt, camera.position, flow);
 
@@ -639,8 +843,22 @@ export function createJellyfish(options = {}) {
       // shows 1.2 s of cleared black, which is the loading screen §7 refuses.
       faded = true;
       canvas.classList.add(READY_CLASS);
+      // The hint mounts here for the same reason and on the same frame, so it
+      // rises WITH the water rather than hanging over the black. `hintShown`
+      // rather than `faded` is what gates it, because this block runs again
+      // after every context restore and the hint is a once-per-load event.
+      if (showHint && !hintShown) {
+        hintShown = true;
+        hintEl = document.createElement('p');
+        hintEl.setAttribute('aria-hidden', 'true');
+        hintEl.style.cssText = HINT_STYLE;
+        hintEl.textContent = HINT_TEXT;
+        host.appendChild(hintEl);
+        hintAge = 0;
+      }
     }
 
+    if (hintEl) hintFrame(stepDt);
     if (dev) devFrame();
   }
 
@@ -692,6 +910,78 @@ export function createJellyfish(options = {}) {
   document.addEventListener('visibilitychange', onVisibility);
 
   /*
+   * §9's three framing keys. Key "1" is station framing, key "2" is the subject
+   * rig alongside the animal, key "3" is the close orbit. Nothing is drawn for
+   * them and nothing is drawn by them: no badge, no toast, no title change, no
+   * cursor change, and the only readout anywhere is the two lines devFrame()
+   * adds inside the `?dev=1` panel.
+   *
+   * ONE element is added to the document, and only one, and only for the first
+   * 8.7 s of a session: the transient controls hint above, which SPEC §9's
+   * second amendment licenses and bounds. The original clause was right about
+   * chrome and wrong about discovery — two undiscoverable keys was a defensible
+   * austerity, three is a defect — so the hint names all three, is removed from
+   * the document at 8.7 s, and never returns. From then on the document is once
+   * again `<main id="sea"><canvas id="gl"></canvas></main>` and nothing else.
+   */
+  function setMode(next) {
+    const m = (next === 'free' || next === 'close') ? next : 'tank';
+    if (m === mode) return;                  // holding a key re-plants nothing
+    mode = m;
+    // Plant the station at the bearing the camera already has about the tank
+    // centre, so the blend removes the lateral component entirely and the move
+    // is a radial dolly rather than a sweep — motes stream past the lens
+    // instead of scything across the snow strata.
+    // Only tank: the other two framings are anchored to the animal and plant
+    // nothing in the world at all, so the tank, the station standoff and the
+    // director's lens keep-out never notice that either of them exists.
+    if (m === 'tank') director.enterTank(camera.position, swim);
+    // Never `immediate`: the weights ease over MODE_TAU and there is no
+    // discontinuity anywhere, so nothing here creates or destroys a GL object,
+    // reallocates a target or invalidates the shaft history. It touches neither
+    // `graph` nor any GL object at all, which is what makes it safe to call at
+    // any moment — while the context is lost, while the programs are still
+    // linking, and from inside any of frame()'s five early returns.
+    camera.setMode(m, swim.position, false);
+  }
+
+  /*
+   * On `document`, never on `window`. Both harness shims install a `window`
+   * that carries `matchMedia` and nothing else, so a single boot-scope
+   * `window.addEventListener` would TypeError and take down every syntax, run
+   * and soak check at once; `document.addEventListener` exists in both.
+   *
+   * The handler reads `event.key` defensively because a dispatched stub may
+   * carry only a type, and it never calls preventDefault: "1", "2" and "3" are
+   * not browser-reserved and collide with nothing in the fleet chrome — the
+   * navbar's clock takes Enter and Space, and nothing else on the page is
+   * focusable. The hint is `pointer-events: none` with no `tabindex` and no
+   * handler of its own, so that stays literally true now that it exists. A
+   * repeat, a modifier, or a focused text field means the keystroke was meant
+   * for something else.
+   *
+   * This is also the hint's dismissal, and it is the ONLY listener the hint
+   * has: adding a second one for it would cost the page a listener it does not
+   * need and the suite an assertion it currently makes.
+   */
+  function onKeyDown(event) {
+    const key = event && event.key;
+    if (key !== '1' && key !== '2' && key !== '3') return;
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    const t = event.target;
+    if (t && (t.isContentEditable ||
+        /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName || ''))) return;
+    // Fast-forward to the head of the fall rather than removing it outright, so
+    // the line leaves on its own 2.5 s ramp: a hint that vanishes on the
+    // keystroke is a dismissal, and a dismissal is chrome. It runs BEFORE
+    // setMode() so that pressing "1" while already in tank framing — which
+    // setMode() correctly treats as a no-op — still acknowledges the keystroke.
+    if (hintEl) hintAge = Math.max(hintAge, (reducedMotion ? 0 : HINT_RISE) + HINT_HOLD);
+    setMode(key === '1' ? 'tank' : key === '2' ? 'free' : 'close');
+  }
+  document.addEventListener('keydown', onKeyDown);
+
+  /*
    * §7: macOS resets the GPU on sleep and this page will be asleep. preventDefault
    * on the loss event is mandatory — without it `webglcontextrestored` never
    * fires at all. Everything the restore needs is a parameter: the geometry is
@@ -727,6 +1017,14 @@ export function createJellyfish(options = {}) {
       pendingDt = 0;
       faded = false;
       canvas.classList.remove(READY_CLASS);
+      // `hintShown` is deliberately NOT reset here, and this is the one line of
+      // the hint's lifecycle worth reading twice. This path runs every time the
+      // machine sleeps and the driver hands the page a new context, and it
+      // legitimately replays the 1.2 s water fade each time; replaying the hint
+      // with it would make a page meant to be left open all day flash the same
+      // three words at whoever walks back to it, which is an itch, and a
+      // recurring bright event is exactly the carrier §10's FFT rule forbids.
+      // Once per page load means once per page load.
       running = !document.hidden;
       schedule();
     }
@@ -741,6 +1039,11 @@ export function createJellyfish(options = {}) {
     reducedMotion = !!(motionQuery && motionQuery.matches);
     swim.setReducedMotion(reducedMotion);
     camera.setReducedMotion(reducedMotion);
+    // The director answers it in two halves: the station and its shake stop
+    // outright, because §4.6 calls camera drift stopped; the optical schedule
+    // keeps running at 15 %, because §4.6 also wants grain, dither and exposure
+    // alive so the image still breathes.
+    director.setReducedMotion(reducedMotion);
   }
   if (motionQuery) {
     if (typeof motionQuery.addEventListener === 'function') {
@@ -748,6 +1051,51 @@ export function createJellyfish(options = {}) {
     } else if (typeof motionQuery.addListener === 'function') {
       motionQuery.addListener(onMotionChange);
     }
+  }
+
+  /* --- The controls hint -------------------------------------------------- */
+
+  /**
+   * One step of the hint, called from frame() with `stepDt` — the accumulated
+   * real time since the previous presented frame, which is what simulate() and
+   * every other integrator on this page are driven by, and which stays true to
+   * the wall clock when §7's 30 Hz floor is dropping alternate rAFs. There is no
+   * timer and no CSS transition anywhere in it, which is the point: a tab that
+   * loses focus stops calling frame(), so the hint stops rather than running its
+   * whole life out into a room nobody is in and being gone when the visitor
+   * comes back.
+   *
+   * `reducedMotion` is read live, every frame, rather than captured when the
+   * element was created. §4.6 keeps each identity and drops the loop, so under
+   * the OS switch both ramps collapse to zero: the line appears at full opacity
+   * with the first frame, holds its 5.0 s, and is removed with no transition.
+   * Reading it here rather than latching it means throwing that switch mid-dwell
+   * takes effect on the very next frame, with no extra state and no listener of
+   * its own — the same argument onMotionChange() makes for everything else.
+   *
+   * The element is REMOVED FROM THE DOCUMENT at the end rather than left at
+   * opacity 0, because §9's claim is about what the document contains and not
+   * about what happens to be visible.
+   */
+  function hintFrame(h) {
+    hintAge += h;
+    const rise = reducedMotion ? 0 : HINT_RISE;
+    const fall = reducedMotion ? 0 : HINT_FALL;
+    if (hintAge >= rise + HINT_HOLD + fall) {
+      hintEl.remove();
+      hintEl = null;
+      return;
+    }
+    let a = 1;
+    if (rise > 0 && hintAge < rise) a = smoothstep(0, rise, hintAge);
+    const fallStart = rise + HINT_HOLD;
+    if (fall > 0 && hintAge > fallStart) {
+      a *= 1 - smoothstep(fallStart, fallStart + fall, hintAge);
+    }
+    // Three decimals is a thousandth of a stop on a 0.60 peak; writing the full
+    // fp64 expansion into the attribute every frame would churn the style string
+    // for a difference no display can show.
+    hintEl.style.opacity = (a * HINT_PEAK).toFixed(3);
   }
 
   /* --- The ?dev=1 panel --------------------------------------------------- */
@@ -783,6 +1131,10 @@ export function createJellyfish(options = {}) {
     if ((frameIndex & 15) !== 0) return;
     const s = quality.settings;
     const t = graph.targets;
+    // The whole simplex, not `modeMix`: with three framings a single scalar
+    // cannot say where the rig actually is mid-ease, and the case worth watching
+    // in this panel is precisely the one that is on no edge of it.
+    const w = camera.modeWeights;
     devPanel.textContent = [
       `tier ${s.tier}${quality.latched ? ' (latched)' : ''}  ${quality.mode}`,
       `RS ${s.renderScale.toFixed(3)}  ${t.width}x${t.height}  sea ${t.seaWidth}x${t.seaHeight}`,
@@ -790,6 +1142,8 @@ export function createJellyfish(options = {}) {
       `thick ${s.analyticThickness ? 'analytic' : 'RS/' + s.thickDivisor}  ${graph.floatPath ? 'fp16' : 'rgba8'}`,
       `phase ${swim.phase.toFixed(3)}  period ${swim.period.toFixed(2)}s  beat ${swim.beatIndex}`,
       `cam ${camera.elevationDegrees.toFixed(1)}deg (max ${camera.maxElevationDegreesSeen.toFixed(1)}, clamps ${camera.elevationClampCount})`,
+      `mode ${camera.mode} w ${w.free.toFixed(2)}/${w.tank.toFixed(2)}/${w.close.toFixed(2)}  tank r ${director.animalRadius.toFixed(2)}m  d ${camera.distanceToTarget.toFixed(2)}m  fov ${(camera.fovY * RAD_TO_DEG).toFixed(1)}`,
+      `light y${swim.worldY.toFixed(2)}  target ${swim.depthTarget.toFixed(2)}  sun ${director.sunElevationDegrees.toFixed(1)}deg  caustic x${director.causticRate.toFixed(2)}`,
       `mem ${(t.memoryEstimateBytes() / 1048576).toFixed(1)} MB  frame ${frameIndex}`
     ].join('\n');
   }
@@ -805,6 +1159,7 @@ export function createJellyfish(options = {}) {
     unwireContext();
     if (observer) observer.disconnect();
     document.removeEventListener('visibilitychange', onVisibility);
+    document.removeEventListener('keydown', onKeyDown);
     return { gl, destroy() { poster.remove(); } };
   }
 
@@ -829,6 +1184,12 @@ export function createJellyfish(options = {}) {
     get strands() { return strands; },
     swim,
     camera,
+    director,
+    // The framing, readable and writable without a key event: `?mode=` is the
+    // boot override and this is the programmatic equivalent, which is how the
+    // suite drives a mode and how an embedder would.
+    get mode() { return mode; },
+    setMode,
     destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -836,6 +1197,7 @@ export function createJellyfish(options = {}) {
       stop();
       if (observer) observer.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('keydown', onKeyDown);
       if (motionQuery) {
         if (typeof motionQuery.removeEventListener === 'function') {
           motionQuery.removeEventListener('change', onMotionChange);
@@ -846,6 +1208,10 @@ export function createJellyfish(options = {}) {
       unwireContext();
       destroyGpu();
       if (devPanel) devPanel.remove();
+      // Torn down inside its own 8.7 s is the one case where the hint outlives
+      // the renderer, and "the module holds no timer, no listener and no GPU
+      // memory" has to mean it holds no DOM either.
+      if (hintEl) { hintEl.remove(); hintEl = null; }
       canvas.classList.remove(READY_CLASS);
       // WEBGL_lose_context is the only way to hand the driver its memory back
       // promptly; without it the context lingers until the GC gets round to it,
@@ -863,12 +1229,43 @@ export function createJellyfish(options = {}) {
  * canvas both exist. `?dev=1` opens the tuning panel and makes the camera's
  * elevation assertion throw rather than clamp; `?tier=N` pins the quality tier,
  * which is how §10's "forced 1 -> 4 -> 1 produces no brightness step and no
- * popping element" is actually checked.
+ * popping element" is actually checked; `?mode=tank`, `?mode=free` or
+ * `?mode=close` boots straight into a framing, which is the same choice keys
+ * "1", "2" and "3" make and the only way to make it without a key event.
+ * Anything other than `free` or `close` is tank, because tank is the default
+ * and an unrecognised value should land on the intended page rather than on one
+ * of the other two.
  */
 const params = new URLSearchParams(location.search);
 const forcedTierParam = Number.parseInt(params.get('tier') || '', 10);
+const modeParam = params.get('mode');
+
+/*
+ * Whether this page shows the transient controls hint, decided once at boot.
+ *
+ * `?hint=1` forces it on whatever else is true, which is the door the suite uses
+ * to observe its lifecycle; `?hint=0` forces it off, which is the door
+ * tests/shot.mjs uses so the photometric baseline is taken with nothing in
+ * frame. Otherwise it is shown only when the visitor might actually need it: an
+ * explicit `?mode=` says they already know the keys exist, and a coarse pointer
+ * says there is no keyboard to press them with — manifest.webmanifest ships this
+ * page standalone, and naming three keys on a phone is simply untrue.
+ *
+ * `window.matchMedia` is probed rather than assumed, exactly the way the
+ * reduce-motion query is above: both harness shims install a `window` that
+ * carries very little, and a page that cannot answer the question shows no hint
+ * rather than throwing on the way to the first frame.
+ */
+const hintParam = params.get('hint');
+const pointerFine = typeof window.matchMedia === 'function' &&
+  !!window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+const showHint = hintParam === '1'
+  ? true
+  : (hintParam !== '0' && !params.get('mode') && pointerFine);
 
 export const jellyfish = createJellyfish({
   dev: params.get('dev') === '1',
-  forcedTier: Number.isFinite(forcedTierParam) ? forcedTierParam : null
+  forcedTier: Number.isFinite(forcedTierParam) ? forcedTierParam : null,
+  mode: modeParam === 'free' ? 'free' : modeParam === 'close' ? 'close' : 'tank',
+  hint: showHint
 });

@@ -16,7 +16,7 @@
     Prints a JSON block of statistics and writes the PNG.                       */
 
 import { spawn } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, existsSync } from 'node:fs'
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf('--' + name)
@@ -25,17 +25,42 @@ const arg = (name, dflt) => {
 
 const WAIT = Number(arg('t', 12000))
 const OUT  = arg('out', 'shot.png')
-const URL_ = arg('url', 'http://localhost:8823/index.html')
+// The default carries ?hint=0. Every statistic below — maxLuminance, p99,
+// dynamicRange, meanSrgb, redToBlueRatio, pureBlackPercent — is taken over
+// every pixel from y = NAVBAR down, so the one line of #a3a3a3 text js/main.js
+// draws along the bottom of the frame for a session's first 8.7 s (SPEC §9's
+// second amendment) would be measured as though it were water: being grey in a
+// frame whose red is almost gone it can only pull redToBlueRatio toward
+// neutral, and landing on near-black it can only lower pureBlackPercent. The
+// default --t of 12000 already clears the hint by 3.3 s, but --t is a flag and
+// this baseline has to belong to the render rather than to the shutter delay.
+// An explicit --url replaces the whole string, ?hint=0 and all.
+const URL_ = arg('url', 'http://localhost:8823/index.html?hint=0')
 const [W, H] = arg('size', '1440x900').split('x').map(Number)
 const NAVBAR = 61                                  // the fleet navbar plus its border
 const PORT = 9200 + (process.pid % 500)
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+/*  The browser, and the one platform-dependent line in this file. $CHROME wins,
+    so a machine with Chrome anywhere unusual needs no edit; otherwise the first
+    binary that exists is taken. ANGLE's Metal backend only exists on macOS, so
+    the backend flag is chosen alongside the binary rather than hard-coded — on
+    Linux that is ANGLE over the desktop GL driver, with SwiftShader still armed
+    behind it for a box with no GPU at all.                                     */
+const CHROME = process.env.CHROME || [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium-browser', '/usr/bin/chromium',
+].find(p => existsSync(p))
+if (!CHROME) {
+  console.error('no Chrome found; set $CHROME to its path')
+  process.exit(1)
+}
+const ANGLE = process.platform === 'darwin' ? '--use-angle=metal' : '--use-angle=gl'
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 const chrome = spawn(CHROME, [
   '--headless=new', `--remote-debugging-port=${PORT}`, `--window-size=${W},${H}`,
-  '--use-gl=angle', '--use-angle=metal', '--enable-unsafe-swiftshader',
+  '--use-gl=angle', ANGLE, '--enable-unsafe-swiftshader',
   '--no-first-run', '--no-default-browser-check',
   `--user-data-dir=/tmp/cdp-jelly-${process.pid}`, 'about:blank',
 ], { stdio: 'ignore' })
