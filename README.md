@@ -3,6 +3,8 @@ One ambient WebGL2 page — a moon jelly, swimming
 
 Part of [Carino Systems](https://carino.systems). Live at **jellyfish.carino.systems**.
 
+![Jellyfish](screenshot.webp)
+
 A single *Aurelia aurita* at 14 m depth, drifting in open blue water. Nothing is
 drawn on screen but the water and the animal: no readout, no title card, no
 counter, no control. Three unlabelled keys choose between three ways of watching
