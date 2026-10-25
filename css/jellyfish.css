@@ -21,11 +21,10 @@ html,body{height:100%;}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);
      display:flex;flex-direction:column;overflow:hidden;}
 
-/* The framing buttons: one group, the current framing pressed. */
+/* The framing buttons: one group, the current framing pressed (the pressed
+   look is carino-ui.css's .cs-btn[aria-pressed="true"]). */
 .jf-actions{display:flex;align-items:center;gap:8px;}
 .jf-seg{display:flex;gap:4px;}
-.jf-seg .cs-btn[aria-pressed="true"],#jfPause[aria-pressed="true"]{
-  color:var(--accent);border-color:var(--accent);background:var(--accent-faint);}
 @media (max-width:640px){ .jf-seg .cs-btn{padding:0 8px;} }
 
 /* min-height:0 is mandatory, or the canvas pushes the page. */
