@@ -29,37 +29,39 @@
      list on a no-build static host strands users on a stale bundle. -->
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="stylesheet" href="fonts/carino-fonts.css" />
+<link rel="stylesheet" href="carino-ui.css" />
 <link rel="stylesheet" href="css/jellyfish.css" />
 </head>
-<body>
-  <!-- The entire document as authored. There is no header.cs-header, no overlay,
-       no control and no readout, and that absence is structural rather than
-       cosmetic: with nothing for carino-navbar.js's relocateActions() to move,
-       its right cluster holds only .social-row, and `.social-row:not(:only-child)`
-       correctly drops the divider. An empty actions wrapper would draw that
-       divider forever.
+<body class="play-body">
+  <!-- The stage is one canvas. The only controls are the three framings and a
+       pause, carried into the navbar through [data-carino-actions] so a phone
+       (which has no 1/2/3 keys) can reach them; the keys still work as before.
+       The navbar is injected as the first child of <body> in normal flow, so
+       body.play-body (a 100% flex column) leaves #sea the remainder: never
+       padding-top:60px, never top:60px. With data-immersive it slides away in
+       fullscreen or when idle, and #sea's ResizeObserver takes the new height.
 
-       One thing arrives after parsing and then leaves again: js/main.js appends
-       exactly one transient <p> to #sea for the first 8.7 s of a session, naming
-       the three framing keys, and then removes it from the document (SPEC §9
-       amendment 2). It carries neither data-carino-actions nor data-carino-strip,
-       it is not a header.cs-header, and it is not a direct child of <body> — and
-       all three of those are what keep relocateActions() (carino-navbar.js:150-163)
-       from moving it into the navbar's right cluster, which would turn that same
-       divider on for ever and lift the element clean out of the water box. The
-       markup below is unchanged by it: still one element and one child.
+       js/main.js still appends one transient <p> to #sea for the first 8.7 s of
+       a session, naming the keys, and then removes it (SPEC §9 amendment 2). -->
+  <div class="jf-actions" data-carino-actions>
+    <div class="jf-seg" role="group" aria-label="View" data-priority="1">
+      <button type="button" class="cs-btn" data-mode="tank" aria-pressed="true" data-i18n>Tank</button>
+      <button type="button" class="cs-btn" data-mode="free" aria-pressed="false" data-i18n>Alongside</button>
+      <button type="button" class="cs-btn" data-mode="close" aria-pressed="false" data-i18n>Close up</button>
+    </div>
+    <button type="button" class="cs-btn" id="jfPause" aria-pressed="false" data-priority="2">Pause</button>
+  </div>
 
-       The navbar is injected as the first child of <body> in normal flow — 60px
-       plus a 1px border, box-sizing:border-box, flex-shrink:0 — so the fleet
-       layout contract applies unchanged: body is a 100% flex column and #sea
-       takes the remainder. Never padding-top:60px, never top:60px. -->
-  <main id="sea"><canvas id="gl"></canvas></main>
+  <main id="sea" class="play-stage"><canvas id="gl"></canvas></main>
 
   <!-- js/main.js first, then the navbar: a module and a deferred classic script
        both run after parsing, in document order, so the renderer has claimed the
        canvas and armed its ResizeObserver before the navbar inserts itself and
        takes 61px off #sea. The observer sees that as an ordinary resize. -->
   <script type="module" src="js/main.js"></script>
-  <script src="carino-navbar.js" data-app="Jellyfish" data-repo="Jellyfish" defer></script>
+  <script type="module" src="js/controls.js"></script>
+  <script src="carino-navbar.js" data-app="Jellyfish" data-repo="Jellyfish" data-immersive defer></script>
+  <script src="carino-lang.js" defer></script>
+  <script src="i18n.js" defer></script>
 </body>
 </html>

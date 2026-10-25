@@ -137,17 +137,16 @@ const READY_CLASS = 'ready';
  */
 
 /**
- * Three words that name what each framing IS rather than what the key does.
- * "alongside" is js/camera.js's own word for the subject rig. Thirty characters:
- * ASCII plus two U+00B7 separators, so the whole string sits inside IBM Plex
- * Sans's LATIN subset — no latin-ext and no cyrillic face is fetched for it, and
- * there is no font-display:swap reflow half a second in. English only, because
- * this repo ships no i18n.js and carino-navbar.js's `window.t` is therefore
- * always undefined here — a real inconsistency with the rest of the fleet,
- * accepted on the grounds that it is three words long and lives for nine
- * seconds.
+ * Three words that name what each framing IS rather than what the key does,
+ * plus the pause key. "alongside" is js/camera.js's own word for the subject
+ * rig. In English it is ASCII plus U+00B7 separators, inside IBM Plex Sans's
+ * LATIN subset; other languages come from i18n.js through window.t and may pull
+ * another subset, which is the fleet's normal cost of a translated line.
  */
-const HINT_TEXT = '1 tank · 2 alongside · 3 close';
+const HINT_TEXT = '1 tank · 2 alongside · 3 close · P pause';
+
+/** i18n.js's window.t when it is there; the harness shims have none, so English. */
+const tr = (s) => (typeof window !== 'undefined' && typeof window.t === 'function') ? window.t(s) : s;
 
 /*
  * No box, no border, no ground, no gold and no click target: a box reads as
@@ -268,7 +267,7 @@ export function createJellyfish(options = {}) {
   const gl = createContext(canvas);
   if (!gl) {
     const poster = showPoster(host,
-      'This page needs WebGL2, which this browser does not have.');
+      tr('This page needs WebGL2, which this browser does not have.'));
     return {
       gl: null,
       destroy() { poster.remove(); }
@@ -375,6 +374,10 @@ export function createJellyfish(options = {}) {
   /* ---- the clock ----------------------------------------------------- */
 
   let running = false;
+  /* The visitor's own pause (P, Space or the navbar button). It holds the
+     loop exactly the way a hidden tab does, and a tab coming back does not
+     undo it. */
+  let paused = false;
   let rafId = 0;
   let lastMs = 0;
   let simTime = 0;
@@ -851,8 +854,11 @@ export function createJellyfish(options = {}) {
         hintShown = true;
         hintEl = document.createElement('p');
         hintEl.setAttribute('aria-hidden', 'true');
+        // i18n.js re-translates it if the language arrives after this frame.
+        hintEl.setAttribute('data-i18n', '');
+        hintEl.setAttribute('data-i18n-key', HINT_TEXT);
         hintEl.style.cssText = HINT_STYLE;
-        hintEl.textContent = HINT_TEXT;
+        hintEl.textContent = tr(HINT_TEXT);
         host.appendChild(hintEl);
         hintAge = 0;
       }
@@ -898,7 +904,7 @@ export function createJellyfish(options = {}) {
       stop();
       return;
     }
-    if (destroyed || contextLost) return;
+    if (destroyed || contextLost || paused) return;
     running = true;
     lastMs = 0;
     pendingDt = 0;
@@ -908,6 +914,14 @@ export function createJellyfish(options = {}) {
     schedule();
   }
   document.addEventListener('visibilitychange', onVisibility);
+
+  /* Pausing stops the loop like a hidden tab; resuming takes the same path a
+     tab coming back takes, so the first frame after it is a normal one. */
+  function setPaused(next) {
+    paused = !!next;
+    if (paused) { running = false; stop(); return; }
+    onVisibility();
+  }
 
   /*
    * §9's three framing keys. Key "1" is station framing, key "2" is the subject
@@ -1025,7 +1039,7 @@ export function createJellyfish(options = {}) {
       // three words at whoever walks back to it, which is an itch, and a
       // recurring bright event is exactly the carrier §10's FFT rule forbids.
       // Once per page load means once per page load.
-      running = !document.hidden;
+      running = !document.hidden && !paused;
       schedule();
     }
   });
@@ -1155,7 +1169,7 @@ export function createJellyfish(options = {}) {
     buildGpu();
   } catch (err) {
     console.error('jellyfish: the renderer could not start', err);
-    const poster = showPoster(host, 'The renderer could not start on this device.');
+    const poster = showPoster(host, tr('The renderer could not start on this device.'));
     unwireContext();
     if (observer) observer.disconnect();
     document.removeEventListener('visibilitychange', onVisibility);
@@ -1190,6 +1204,8 @@ export function createJellyfish(options = {}) {
     // suite drives a mode and how an embedder would.
     get mode() { return mode; },
     setMode,
+    get paused() { return paused; },
+    setPaused,
     destroy() {
       if (destroyed) return;
       destroyed = true;
